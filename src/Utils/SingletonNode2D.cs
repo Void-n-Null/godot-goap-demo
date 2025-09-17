@@ -1,57 +1,133 @@
 using Godot;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Game.Utils;
 
+/// <summary>
+/// Base class for singleton Node2D implementations.
+/// Optimized for performance with lazy initialization and efficient scene tree search.
+/// </summary>
 public partial class SingletonNode2D<T> : Node2D where T : SingletonNode2D<T>
 {
     private static T _instance;
-    public static T Instance {
-        get {
-            if (_instance == null){
-                GD.Print("SingletonNode2D: Instance is not set");
-                // Try to find existing instance in scene tree
-                if (Engine.GetMainLoop() is SceneTree sceneTree && sceneTree.Root != null) {
-                    _instance = FindInstanceInSceneTree(sceneTree.Root);
-                    GD.Print("SingletonNode2D: Instance found in scene tree");
-                }
+    private static readonly object _lock = new();
+    private static bool _isInitialized;
 
-                // If still not found, throw exception
-                if (_instance == null){
-                    GD.Print("SingletonNode2D: Instance could not be found in scene tree");
-                    throw new Exception($"Instance of {typeof(T).Name} is not set and could not be found in scene tree");
+    /// <summary>
+    /// Gets the singleton instance of type T.
+    /// Thread-safe lazy initialization with optimized scene tree search.
+    /// </summary>
+    public static T Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                lock (_lock)
+                {
+                    if (_instance == null)
+                    {
+                        InitializeInstance();
+                    }
                 }
             }
-            GD.Print("SingletonNode2D: Instance is set");
             return _instance;
-        }
-        private set {
-            _instance = value;
         }
     }
 
-    private static T FindInstanceInSceneTree(Node root) {
-        // Check if root node itself is the instance
-        if (root is T instance) {
-            return instance;
+    private static void InitializeInstance()
+    {
+        // First try to get from current scene tree
+        if (Engine.GetMainLoop() is SceneTree sceneTree && sceneTree.Root != null)
+        {
+            _instance = FindInstanceInSceneTree(sceneTree.Root);
         }
 
-        // Recursively search children
-        foreach (var child in root.GetChildren()) {
-            var found = FindInstanceInSceneTree(child);
-            if (found != null) {
-                return found;
+        // If not found and not yet initialized, this is an error
+        if (_instance == null && !_isInitialized)
+        {
+            throw new InvalidOperationException(
+                $"Singleton instance of {typeof(T).Name} not found. " +
+                "Ensure the singleton node is added to the scene tree before accessing Instance.");
+        }
+    }
+
+    /// <summary>
+    /// Optimized breadth-first search to prevent stack overflow on deep hierarchies.
+    /// </summary>
+    private static T FindInstanceInSceneTree(Node root)
+    {
+        var queue = new Queue<Node>();
+        queue.Enqueue(root);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+
+            // Check current node
+            if (current is T instance)
+            {
+                return instance;
+            }
+
+            // Add children to queue (breadth-first)
+            foreach (Node child in current.GetChildren())
+            {
+                queue.Enqueue(child);
             }
         }
 
         return null;
     }
 
-    public override void _Ready(){
-        _instance = this as T;
+    public override void _Ready()
+    {
+        base._Ready();
+
+        lock (_lock)
+        {
+            if (_instance != null && _instance != this)
+            {
+                GD.PushWarning($"Multiple instances of {typeof(T).Name} detected. " +
+                              "Using the first initialized instance.");
+                return;
+            }
+
+            _instance = this as T;
+            _isInitialized = true;
+        }
+    }
+
+    public override void _ExitTree()
+    {
+        base._ExitTree();
+
+        // Only clear instance if this is the current instance
+        lock (_lock)
+        {
+            if (_instance == this)
+            {
+                _instance = null;
+                _isInitialized = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks if the singleton instance exists without triggering initialization.
+    /// </summary>
+    public static bool HasInstance => _instance != null;
+
+    /// <summary>
+    /// Force re-initialization of the singleton (use with caution).
+    /// </summary>
+    public static void Reset()
+    {
+        lock (_lock)
+        {
+            _instance = null;
+            _isInitialized = false;
+        }
     }
 }
