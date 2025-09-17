@@ -11,7 +11,8 @@ config_version=5
 [application]
 
 config/name="godot-goap-demo"
-config/features=PackedStringArray("4.5", "Forward Plus")
+run/main_scene="uid://dq2aum37rpm8x"
+config/features=PackedStringArray("4.5", "C#", "Forward Plus")
 config/icon="res://textures/icon.svg"
 
 [dotnet]
