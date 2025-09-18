@@ -1,13 +1,14 @@
 using Godot;
 using Game.Data;
 using Game.Data.Components;
+using Game.Utils;
 
 namespace Game.Data.Components;
 
 /// <summary>
 /// Movement component with velocity and acceleration.
 /// </summary>
-public class MovementComponent(float MaxSpeed = 500f, float Friction = 0.9f) : IComponent
+public class MovementComponent(float MaxSpeed = 500f, float Friction = 0.9f) : IActiveComponent
 {
     public Vector2 Velocity { get; set; }
     public Vector2 Acceleration { get; set; }
@@ -21,22 +22,28 @@ public class MovementComponent(float MaxSpeed = 500f, float Friction = 0.9f) : I
 
     public void Update(double delta)
     {
-        if (_transform2D != null)
+        if (_transform2D == null) return;
+
+        // Move at constant speed toward mouse cursor (global coordinates)
+        Vector2? mouse = null;
+        if (ViewContext.DefaultParent is Node2D parent2D)
         {
-            // Apply acceleration
-            Velocity += Acceleration * (float)delta;
+            mouse = parent2D.GetGlobalMousePosition();
+        }
 
-            // Apply friction
-            Velocity *= Friction;
-
-            // Clamp speed
-            if (Velocity.Length() > MaxSpeed)
+        if (mouse.HasValue)
+        {
+            var toMouse = mouse.Value - _transform2D.Position;
+            if (toMouse.Length() > 0.001f)
             {
-                Velocity = Velocity.Normalized() * MaxSpeed;
+                var direction = toMouse.Normalized();
+                Velocity = direction * MaxSpeed; // constant-speed movement
+                _transform2D.Position += Velocity * (float)delta;
             }
-
-            // Update position using cached reference (no type checking!)
-            _transform2D.Position += Velocity * (float)delta;
+            else
+            {
+                Velocity = Vector2.Zero;
+            }
         }
     }
 

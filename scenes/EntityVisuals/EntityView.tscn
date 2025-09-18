@@ -1,0 +1,3 @@
+[gd_scene format=3 uid="uid://fw3gh3l2o2q8"]
+
+[node name="EntityView" type="Sprite2D"]

@@ -1,12 +1,15 @@
-[gd_scene load_steps=3 format=3 uid="uid://dq2aum37rpm8x"]
+[gd_scene load_steps=4 format=3 uid="uid://dq2aum37rpm8x"]
 
-[ext_resource type="Script" uid="uid://b0ywof1dy3e0x" path="res://src/GameManager.cs" id="1_0wfyh"]
-[ext_resource type="Script" uid="uid://b1wgwxmtsk6qv" path="res://src/Universe/Test.cs" id="1_o5qli"]
+[ext_resource type="Script" uid="uid://bq3gj5vumkyum" path="res://src/Universe/GameManager.cs" id="1_0wfyh"]
+[ext_resource type="Script" uid="uid://du6ym5nkamemi" path="res://src/Universe/EntityManager.cs" id="2_0wfyh"]
+[ext_resource type="PackedScene" uid="uid://fw3gh3l2o2q8" path="res://scenes/EntityVisuals/EntityView.tscn" id="3_sugp2"]
 
-[node name="World" type="Node2D"]
+[node name="Game" type="Node2D"]
 script = ExtResource("1_0wfyh")
-TickRatePerSecond = 5
 
-[node name="Node2D" type="Node2D" parent="."]
-rotation = -0.0006294531
-script = ExtResource("1_o5qli")
+[node name="EntityManager" type="Node" parent="." node_paths=PackedStringArray("ViewRoot")]
+script = ExtResource("2_0wfyh")
+ViewRoot = NodePath("../Entities")
+DefaultViewScene = ExtResource("3_sugp2")
+
+[node name="Entities" type="Node2D" parent="."]

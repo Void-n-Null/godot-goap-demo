@@ -28,11 +28,11 @@ namespace Game.Data.Components;
 
 /// <summary>
 /// Base component interface with two-phase attachment.
+/// Use for metadata/data-only components that do not tick each frame.
 /// </summary>
 public interface IComponent
 {
     Entity Entity { get; set; }
-    virtual void Update(double delta) { }
 
     /// <summary>
     /// Phase 1: Basic setup, component properties only.
@@ -51,4 +51,12 @@ public interface IComponent
     /// Clean up references and event handlers here.
     /// </summary>
     virtual void OnDetached() { }
+}
+
+/// <summary>
+/// Active components implement per-frame behavior and are updated by the Entity.
+/// </summary>
+public interface IActiveComponent : IComponent
+{
+    void Update(double delta);
 }

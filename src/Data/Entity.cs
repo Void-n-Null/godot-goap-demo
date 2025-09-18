@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using Game.Data.Components;
 
-
 namespace Game.Data;
 
 /// <summary>
@@ -20,7 +19,43 @@ public abstract class Entity : IUpdatableEntity
     /// <summary>
     /// Entity tags for categorization and filtering.
     /// </summary>
-    public HashSet<string> Tags { get; } = new();
+    public HashSet<Tag> Tags { get; } = [];
+
+    /// <summary>
+    /// Adds a tag to this entity.
+    /// </summary>
+    public bool AddTag(Tag tag) => Tags.Add(tag);
+
+    /// <summary>
+    /// Adds a tag from its string name (bridged via registry).
+    /// </summary>
+    public bool AddTag(string tagName) => Tags.Add(Tag.From(tagName));
+
+    /// <summary>
+    /// Removes a tag from this entity.
+    /// </summary>
+    public bool RemoveTag(Tag tag) => Tags.Remove(tag);
+
+    /// <summary>
+    /// Removes a tag by its string name.
+    /// </summary>
+    public bool RemoveTag(string tagName)
+    {
+        return Tag.TryFrom(tagName, out var tag) && Tags.Remove(tag);
+    }
+
+    /// <summary>
+    /// Checks if this entity has the given tag.
+    /// </summary>
+    public bool HasTag(Tag tag) => Tags.Contains(tag);
+
+    /// <summary>
+    /// Checks if this entity has the tag by name.
+    /// </summary>
+    public bool HasTag(string tagName)
+    {
+        return Tag.TryFrom(tagName, out var tag) && Tags.Contains(tag);
+    }
 
     /// <summary>
     /// Whether this entity should be updated.
@@ -30,25 +65,44 @@ public abstract class Entity : IUpdatableEntity
     /// <summary>
     /// Components attached to this entity.
     /// </summary>
-    protected readonly Dictionary<Type, IComponent> _components = new();
+    protected readonly Dictionary<Type, IComponent> _components = [];
 
     /// <summary>
-    /// Gets a component of the specified type.
+    /// Active components that should receive per-frame updates.
+    /// Stored in a list for tight iteration.
     /// </summary>
-    public T GetComponent<T>() where T : IComponent
+    protected readonly List<IActiveComponent> _activeComponents = [];
+
+    /// <summary>
+    /// Gets a component of the specified type, or null if not found.
+    /// </summary>
+    public T GetComponent<T>() where T : class, IComponent
     {
-        return _components.TryGetValue(typeof(T), out var component) ? (T)component : default;
+        return _components.TryGetValue(typeof(T), out var component) ? (T)component : null;
     }
 
     /// <summary>
     /// Adds or replaces a component using two-phase attachment.
+    /// Uses the component's runtime type for storage to avoid interface-type overwrites.
     /// </summary>
     public void AddComponent<T>(T component) where T : IComponent
     {
-        _components[typeof(T)] = component;
+        var key = component.GetType();
+        _components[key] = component;
         component.Entity = this;
 
         // Two-phase attachment for safe component initialization
+        component.OnPreAttached();
+    }
+
+    /// <summary>
+    /// Adds or replaces a component when only the interface type is available at callsite.
+    /// </summary>
+    public void AddComponent(IComponent component)
+    {
+        var key = component.GetType();
+        _components[key] = component;
+        component.Entity = this;
         component.OnPreAttached();
     }
 
@@ -61,6 +115,10 @@ public abstract class Entity : IUpdatableEntity
         foreach (var component in _components.Values)
         {
             component.OnPostAttached();
+            if (component is IActiveComponent active)
+            {
+                _activeComponents.Add(active);
+            }
         }
     }
 
@@ -73,6 +131,10 @@ public abstract class Entity : IUpdatableEntity
         {
             component.OnDetached();
             component.Entity = null;
+            if (component is IActiveComponent active)
+            {
+                _activeComponents.Remove(active);
+            }
             return _components.Remove(typeof(T));
         }
         return false;
@@ -99,9 +161,10 @@ public abstract class Entity : IUpdatableEntity
     {
         if (!IsActive) return;
 
-        foreach (var component in _components.Values)
+        // Fast path: only iterate active components
+        for (int i = 0; i < _activeComponents.Count; i++)
         {
-            component.Update(delta);
+            _activeComponents[i].Update(delta);
         }
     }
 
@@ -115,7 +178,48 @@ public abstract class Entity : IUpdatableEntity
             component.OnDetached();
         }
         _components.Clear();
+        _activeComponents.Clear();
     }
+
+    /// <summary>
+    /// Factory: builds an Entity from an EntityBlueprint. If a non-empty ScenePath is resolved
+    /// and no VisualComponent is added by the blueprint, a VisualComponent is auto-added.
+    /// Does not set position or initialize; caller should set any initial state and then call Initialize().
+    /// </summary>
+    public static Entity From(EntityBlueprint blueprint)
+    {
+        // Plain concrete entity type (no inheritance tree required)
+        var entity = new PlainEntity();
+
+        // Base transform for 2D entities is just a TransformComponent2D in the blueprint chain.
+        foreach (var tag in blueprint.GetAllTags())
+        {
+            entity.AddTag(tag);
+        }
+
+        // Materialize all components
+        bool hasVisual = false;
+        foreach (var comp in blueprint.CreateAllComponents())
+        {
+            entity.AddComponent(comp);
+            if (comp is VisualComponent) hasVisual = true;
+        }
+
+        // If a ScenePath is resolved but no VisualComponent provided, add one
+        var scenePath = blueprint.ResolveScenePath();
+        if (!string.IsNullOrEmpty(scenePath) && !hasVisual)
+        {
+            entity.AddComponent(new VisualComponent(scenePath));
+        }
+
+        // Caller is responsible for setting transform data and calling Initialize()
+        return entity;
+    }
+
+    /// <summary>
+    /// Minimal concrete entity since Entity is abstract.
+    /// </summary>
+    private sealed class PlainEntity : Entity { }
 }
 
 
@@ -126,88 +230,3 @@ public abstract class Entity : IUpdatableEntity
 
 
 
-/// <summary>
-/// Health component with damage and healing.
-/// </summary>
-public class HealthComponent : IComponent
-{
-    public float MaxHealth { get; set; } = 100f;
-    public float CurrentHealth { get; set; }
-
-    public bool IsAlive => CurrentHealth > 0;
-    public float HealthPercentage => MaxHealth > 0 ? CurrentHealth / MaxHealth : 0f;
-
-    public event Action<float> OnHealthChanged;
-    public event Action OnDeath;
-
-    public Entity Entity { get; set; }
-
-    public HealthComponent(float maxHealth = 100f)
-    {
-        MaxHealth = maxHealth;
-        CurrentHealth = maxHealth;
-    }
-
-    public void TakeDamage(float damage)
-    {
-        if (!IsAlive) return;
-
-        CurrentHealth = Mathf.Max(0, CurrentHealth - damage);
-        OnHealthChanged?.Invoke(CurrentHealth);
-
-        if (CurrentHealth <= 0)
-        {
-            OnDeath?.Invoke();
-        }
-    }
-
-    public void Heal(float amount)
-    {
-        if (!IsAlive) return;
-
-        CurrentHealth = Mathf.Min(MaxHealth, CurrentHealth + amount);
-        OnHealthChanged?.Invoke(CurrentHealth);
-    }
-
-    public void Update(double delta)
-    {
-        // Could implement health regeneration, poison effects, etc.
-    }
-
-    public void OnPreAttached()
-    {
-        // Phase 1: Basic health setup
-        // Could validate health values, set up internal state
-    }
-
-    public void OnPostAttached()
-    {
-        // Phase 2: Could interact with other components
-        // For example, could listen to movement events, or affect visual appearance
-        var visual = Entity.GetComponent<VisualComponent>();
-        if (visual != null)
-        {
-            // Could set up visual feedback for health changes
-            OnHealthChanged += (health) => UpdateVisualHealthFeedback(visual, health);
-        }
-    }
-
-    private void UpdateVisualHealthFeedback(VisualComponent visual, float health)
-    {
-        // Could modify visual appearance based on health
-        if (visual.ViewNode != null)
-        {
-            // Example: Change color based on health
-            float healthRatio = HealthPercentage;
-            var color = new Color(1, healthRatio, healthRatio); // Red when low health
-            // This would require the ViewNode to have a Sprite2D or similar
-        }
-    }
-
-    public void OnDetached()
-    {
-        // Clean up event handlers
-        OnHealthChanged = null;
-        OnDeath = null;
-    }
-}

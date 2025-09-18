@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Game;
 using Game.Data;
 using Game.Data.Components;
+using TG = Game.Data.Tags;
 
 namespace Game.Universe;
 
@@ -11,250 +12,122 @@ namespace Game.Universe;
 /// Flexible entity manager that supports entities with and without views.
 /// Uses efficient array-based storage instead of dictionaries for performance.
 /// </summary>
-public partial class EntityManager : Utils.SingletonNode2D<EntityManager>
+public partial class EntityManager : Utils.SingletonNode<EntityManager>
 {
-    /// <summary>
-    /// Maximum entities to prevent memory issues.
-    /// </summary>
-    private const int MAX_ENTITIES = 10000;
+	[Export]
+	public Node ViewRoot { get; set; }
+	[Export]
+	public PackedScene DefaultViewScene { get; set; }
+	/// <summary>
+	/// Maximum entities to prevent memory issues.
+	/// </summary>
+	private const int MAX_ENTITIES = 10000;
 
-    /// <summary>
-    /// All entities (with or without views) for bulk updates.
-    /// Fast array iteration, no dictionary overhead.
-    /// </summary>
-    private readonly List<IUpdatableEntity> _entities = new(MAX_ENTITIES);
+	/// <summary>
+	/// All entities (with or without views) for bulk updates.
+	/// Fast array iteration, no dictionary overhead.
+	/// </summary>
+	private readonly List<IUpdatableEntity> _entities = new(MAX_ENTITIES);
 
-    /// <summary>
-    /// Optional view mapping - only for entities that have visual representation.
-    /// Small dictionary is fine since not all entities need views.
-    /// </summary>
-    private readonly Dictionary<IUpdatableEntity, Node2D> _entityToView = new();
+	// Intentionally no view mappings. Views are owned by VisualComponent.
 
-    /// <summary>
-    /// Reverse lookup for view-to-entity mapping.
-    /// </summary>
-    private readonly Dictionary<Node2D, IUpdatableEntity> _viewToEntity = new();
+	public override void _Ready()
+	{
+		GD.Print("EntityManager: Ready");
+		base._Ready();
 
-    public override void _Ready()
-    {
-        GD.Print("EntityManager: Ready");
-        base._Ready();
+		// Subscribe to GameManager's efficient tick system
+		GameManager.Instance.SubscribeToTick(OnTick);
 
-        // Subscribe to GameManager's efficient tick system
-        GameManager.Instance.SubscribeToTick(OnTick);
-    }
+		// Set global view defaults if provided
+		if (ViewRoot != null)
+		{
+			Utils.ViewContext.DefaultParent = ViewRoot;
+		}
 
-    /// <summary>
-    /// Ultra-fast bulk update - direct array iteration.
-    /// No dictionary lookups, no event delegation overhead.
-    /// </summary>
-    private void OnTick(double delta)
-    {
-        for (int i = 0; i < _entities.Count; i++)
-        {
-            _entities[i].Update(delta);
-        }
-    }
+		if (DefaultViewScene != null)
+		{
+			Utils.ViewContext.DefaultViewScene = DefaultViewScene;
+		}
+	}
 
-    /// <summary>
-    /// Registers any entity for bulk updates.
-    /// Works for both view-based and view-less entities.
-    /// </summary>
-    public bool RegisterEntity(IUpdatableEntity entity)
-    {
-        if (_entities.Count >= MAX_ENTITIES)
-        {
-            GD.PushWarning($"EntityManager: Max entities ({MAX_ENTITIES}) reached");
-            return false;
-        }
+	/// <summary>
+	/// Ultra-fast bulk update - direct array iteration.
+	/// No dictionary lookups, no event delegation overhead.
+	/// </summary>
+	private void OnTick(double delta)
+	{
+		for (int i = 0; i < _entities.Count; i++)
+		{
+			_entities[i].Update(delta);
+		}
+	}
 
-        if (!_entities.Contains(entity))
-        {
-            _entities.Add(entity);
-            return true;
-        }
+	/// <summary>
+	/// Registers any entity for bulk updates.
+	/// Works for both view-based and view-less entities.
+	/// </summary>
+	public bool RegisterEntity(IUpdatableEntity entity)
+	{
+		if (_entities.Count >= MAX_ENTITIES)
+		{
+			GD.PushWarning($"EntityManager: Max entities ({MAX_ENTITIES}) reached");
+			return false;
+		}
 
-        return false;
-    }
+		if (!_entities.Contains(entity))
+		{
+			_entities.Add(entity);
+			return true;
+		}
 
-    /// <summary>
-    /// Registers an entity with a visual view component.
-    /// </summary>
-    public bool RegisterEntityWithView(IUpdatableEntity entity, Node2D view)
-    {
-        if (!RegisterEntity(entity))
-            return false;
+		return false;
+	}
 
-        _entityToView[entity] = view;
-        _viewToEntity[view] = entity;
+	/// <summary>
+	/// Registers an entity with a visual view component.
+	/// </summary>
+	// No RegisterEntityWithView; VisualComponent attaches its own ViewNode.
 
-        // Add view to scene if not already added
-        if (view.GetParent() == null)
-        {
-            AddChild(view);
-        }
+	/// <summary>
+	/// Unregisters an entity from updates.
+	/// </summary>
+	public bool UnregisterEntity(IUpdatableEntity entity)
+	{
+		if (_entities.Remove(entity))
+		{
+			return true;
+		}
+		return false;
+	}
 
-        return true;
-    }
+	/// <summary>
+	/// Gets all entities (for iteration if needed).
+	/// </summary>
+	public IReadOnlyList<IUpdatableEntity> GetEntities() => _entities;
 
-    /// <summary>
-    /// Unregisters an entity from updates.
-    /// </summary>
-    public bool UnregisterEntity(IUpdatableEntity entity)
-    {
-        if (_entities.Remove(entity))
-        {
-            // Remove view mapping if it exists
-            if (_entityToView.TryGetValue(entity, out var view))
-            {
-                _entityToView.Remove(entity);
-                _viewToEntity.Remove(view);
+	public int EntityCount => _entities.Count;
+	// No ViewCount here.
 
-                // Optionally remove view from scene
-                if (view.GetParent() == this)
-                {
-                    RemoveChild(view);
-                }
-            }
-            return true;
-        }
-        return false;
-    }
+	/// <summary>
+	/// Spawns an entity from a blueprint, optionally sets position, registers and initializes it.
+	/// </summary>
+	public Entity Spawn(EntityBlueprint blueprint, Vector2? position = null)
+	{
+		var entity = Entity.From(blueprint);
 
-    /// <summary>
-    /// Gets the view for an entity (if it has one).
-    /// </summary>
-    public Node2D GetViewForEntity(IUpdatableEntity entity)
-    {
-        return _entityToView.GetValueOrDefault(entity);
-    }
+		// Set initial transform data if provided
+		if (position.HasValue)
+		{
+			var t = entity.GetComponent<TransformComponent2D>();
+			if (t != null) t.Position = position.Value;
+		}
 
-    /// <summary>
-    /// Gets the entity for a view (if it exists).
-    /// </summary>
-    public IUpdatableEntity GetEntityForView(Node2D view)
-    {
-        return _viewToEntity.GetValueOrDefault(view);
-    }
+		// Register (views attach themselves inside VisualComponent)
+		RegisterEntity(entity);
 
-    /// <summary>
-    /// Gets all entities (for iteration if needed).
-    /// </summary>
-    public IReadOnlyList<IUpdatableEntity> GetEntities() => _entities;
-
-    public int EntityCount => _entities.Count;
-    public int ViewCount => _entityToView.Count;
-}
-
-
-// ===== USAGE EXAMPLES =====
-
-/// <summary>
-/// Simple data entity (inherits from base Entity).
-/// </summary>
-public class GameStateEntity : Entity
-{
-    public int Score { get; set; }
-    public float GameTime { get; set; }
-
-    public override void Update(double delta)
-    {
-        base.Update(delta); // Updates components
-
-        if (IsActive)
-        {
-            GameTime += (float)delta;
-
-            if (GameTime > 60 && Score < 100)
-            {
-                GD.Print("Game Over - Time's up!");
-            }
-        }
-    }
-}
-
-/// <summary>
-/// Player entity with movement and visuals.
-/// </summary>
-public class PlayerEntity : VisualEntity2D
-{
-    public MovementComponent Movement => GetComponent<MovementComponent>();
-    public HealthComponent Health => GetComponent<HealthComponent>();
-
-    public PlayerEntity(Vector2 position) : base(position, "res://scenes/PlayerView.tscn")
-    {
-        // Add specialized components (Phase 1: PreAttached called automatically)
-        AddComponent(new MovementComponent { MaxSpeed = 300f });
-        AddComponent(new HealthComponent(150f));
-
-        // Complete attachment (Phase 2: PostAttached called for all components)
-        Initialize();
-
-        // Now safe to setup component interactions (all components are fully attached)
-        Health.OnDeath += () => GD.Print("Player died!");
-        Health.OnHealthChanged += (health) => GD.Print($"Player health: {health}");
-
-        // Add tags for filtering
-        Tags.Add("Player");
-        Tags.Add("Controllable");
-    }
-
-    public override void Update(double delta)
-    {
-        base.Update(delta); // Updates all components including visuals
-
-        // Player-specific logic
-        HandleInput();
-    }
-
-    private void HandleInput()
-    {
-        var input = Input.GetVector("left", "right", "up", "down");
-        Movement.Acceleration = input * 1000f; // Strong acceleration from input
-    }
-}
-
-/// <summary>
-/// AI enemy entity.
-/// </summary>
-public class EnemyEntity : VisualEntity2D
-{
-    public MovementComponent Movement => GetComponent<MovementComponent>();
-    public HealthComponent Health => GetComponent<HealthComponent>();
-
-    public EnemyEntity(Vector2 position) : base(position, "res://scenes/EnemyView.tscn")
-    {
-        // Phase 1: Add components (PreAttached called)
-        AddComponent(new MovementComponent { MaxSpeed = 150f });
-        AddComponent(new HealthComponent(50f));
-
-        // Phase 2: Complete attachment (PostAttached called for all)
-        CompleteAttachment();
-
-        // Now safe to setup interactions
-        Tags.Add("Enemy");
-        Tags.Add("AI");
-
-        Health.OnDeath += () => Destroy();
-    }
-
-    public override void Update(double delta)
-    {
-        base.Update(delta);
-
-        // Simple AI: move toward player
-        var player = FindNearestPlayer();
-        if (player != null)
-        {
-            var direction = (player.Position.Position - Position.Position).Normalized();
-            Movement.Acceleration = direction * 200f;
-        }
-    }
-
-    private PlayerEntity FindNearestPlayer()
-    {
-        // This would need implementation based on your spatial partitioning
-        // For now, return null (no AI movement)
-        return null;
-    }
+		// Complete attach
+		entity.Initialize();
+		return entity;
+	}
 }

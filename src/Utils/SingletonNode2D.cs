@@ -5,10 +5,10 @@ using System.Collections.Generic;
 namespace Game.Utils;
 
 /// <summary>
-/// Base class for singleton Node2D implementations.
+/// Base class for singleton Node implementations.
 /// Optimized for performance with lazy initialization and efficient scene tree search.
 /// </summary>
-public partial class SingletonNode2D<T> : Node2D where T : SingletonNode2D<T>
+public partial class SingletonNode<T> : Node where T : SingletonNode<T>
 {
     private static T _instance;
     private static readonly object _lock = new();
