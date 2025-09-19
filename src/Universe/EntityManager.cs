@@ -112,9 +112,9 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// <summary>
 	/// Spawns an entity from a blueprint, optionally sets position, registers and initializes it.
 	/// </summary>
-	public Entity Spawn(EntityBlueprint blueprint, Vector2? position = null)
+	public Entity Spawn(EntityBlueprint blueprint)
 	{
-		var entity = EntityFactory.Create(blueprint, position);
+		var entity = EntityFactory.Create(blueprint);
 
 		// Register (views attach themselves inside VisualComponent)
 		RegisterEntity(entity);

@@ -24,13 +24,8 @@ public class MovementComponent(float MaxSpeed = 500f, float Friction = 0.9f) : I
     {
         if (_transform2D == null) return;
 
-        // Move at constant speed toward mouse cursor (global coordinates)
-        Vector2? mouse = null;
-        if (ViewContext.DefaultParent is Node2D parent2D)
-        {
-            mouse = parent2D.GetGlobalMousePosition();
-        }
-
+        // Move at constant speed toward cached mouse cursor (global coordinates)
+        var mouse = ViewContext.CachedMouseGlobalPosition;
         if (mouse.HasValue)
         {
             var toMouse = mouse.Value - _transform2D.Position;

@@ -11,18 +11,50 @@ namespace Game.Data;
 /// </summary>
 public static class EntityFactory
 {
-    public static Entity Create(EntityBlueprint blueprint, Vector2? position = null)
+    private sealed class FactoryEntity : Entity { }
+
+    public static Entity Create(EntityBlueprint blueprint, params Action<Entity>[] additionalMutators)
     {
-        if (blueprint == null) throw new ArgumentNullException(nameof(blueprint));
+        ArgumentNullException.ThrowIfNull(blueprint);
+        var entity = new FactoryEntity();
 
-        // Build base entity and add all components (pre-attach already runs in AddComponent)
-        var entity = Entity.From(blueprint);
+        // Add tags
+        foreach (var tag in blueprint.GetAllTags())
+            entity.AddTag(tag);
 
-        // Apply initial transform if provided
-        if (position.HasValue)
+        // Components (respect duplicate policy)
+        var seenTypes = new System.Collections.Generic.HashSet<Type>();
+        var warnedTypes = new System.Collections.Generic.HashSet<Type>();
+        foreach (var comp in blueprint.CreateAllComponents())
         {
-            var t = entity.GetComponent<TransformComponent2D>();
-            if (t != null) t.Position = position.Value;
+            var t = comp.GetType();
+            var policy = blueprint.GetDuplicatePolicy(t);
+            if (seenTypes.Contains(t))
+            {
+                switch (policy)
+                {
+                    case DuplicatePolicy.Prohibit:
+                        if (!warnedTypes.Contains(t))
+                        {
+                            GD.PushWarning($"EntityFactory: Duplicate component {t.Name} in blueprint '{blueprint.Name}' prohibited; skipping.");
+                            warnedTypes.Add(t);
+                        }
+                        continue;
+                    case DuplicatePolicy.AllowMultiple:
+                        if (!warnedTypes.Contains(t))
+                        {
+                            GD.PushWarning($"EntityFactory: Duplicate component {t.Name} allowed by policy but storage supports only one per type; replacing previous instance.");
+                            warnedTypes.Add(t);
+                        }
+                        break; // replace previous instance (type-keyed storage)
+                    case DuplicatePolicy.Replace:
+                    default:
+                        break;
+                }
+            }
+
+            entity.AddComponent(comp);
+            seenTypes.Add(t);
         }
 
         // Run blueprint mutators (root -> leaf) prior to post-attach
@@ -35,6 +67,22 @@ public static class EntityFactory
             catch (Exception ex)
             {
                 GD.PushWarning($"EntityFactory: Mutator threw in blueprint '{blueprint.Name}': {ex.Message}");
+            }
+        }
+
+        // Run caller-provided additional mutators (override-friendly)
+        if (additionalMutators != null)
+        {
+            foreach (var mutate in additionalMutators)
+            {
+                try
+                {
+                    mutate?.Invoke(entity);
+                }
+                catch (Exception ex)
+                {
+                    GD.PushWarning($"EntityFactory: Additional mutator threw: {ex.Message}");
+                }
             }
         }
 

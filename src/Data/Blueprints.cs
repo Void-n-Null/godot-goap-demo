@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Game.Data.Components;
+using Game.Utils;
 using Godot;
 
 namespace Game.Data;
@@ -43,7 +44,7 @@ public static class Blueprints
     public static readonly EntityBlueprint Girl = VisualEntity2D.Derive(
         name: "Girl",
         addComponents: () => [
-            new MovementComponent(MaxSpeed: 300f, Friction: 1f)
+            new MovementComponent(MaxSpeed: 300f * Utils.Random.NextFloat(0.5f, 1.5f), Friction: 1f)
         ],
         addMutators: [
             EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = "res://textures/Girl.png")

@@ -1,6 +1,8 @@
 using Godot;
 using System;
 using Game.Data;
+using Game.Data.Components;
+using Game.Utils;
 
 namespace Game.Universe;
 
@@ -15,6 +17,8 @@ public partial class GameManager : Utils.SingletonNode<GameManager>
 	/// <param name="callback">The callback to subscribe to</param>
 	private event Action<double> Frame;
 	[Export] int TickRatePerSecond = 60;
+	[Export] int MaxTicksPerFrame = 4; // prevent spiral of death
+	[Export] double MaxAccumulatedTimeSeconds = 0.25; // cap backlog to ~15 ticks at 60 Hz
 
 	private event Action<double> Tick;
 	private double _accumulatedTime = 0.0;
@@ -39,14 +43,17 @@ public partial class GameManager : Utils.SingletonNode<GameManager>
 
 	public override void _Ready()
 	{
+		Utils.Random.Initialize();
 		GD.Print("GameManager: Ready");
 		base._Ready();
 
-        // Test spawn: a simple visual-only entity (Girl) with a sprite
-		for (int i = 0; i < 10; i++)
+		// Test spawn: a few girls with random positions set after creation
+		for (int i = 0; i < 5000; i++)
 		{
-			var spawnPos = new Vector2(Random.Shared.Next(0, 1000), Random.Shared.Next(0, 1000));
-			EntityManager.Instance.Spawn(Blueprints.Girl, spawnPos);
+			var entity = EntityManager.Instance.Spawn(Blueprints.Girl);
+
+			if (entity.Transform != null)
+				entity.Transform.Position = Utils.Random.NextVector2(-5000, 5000);
 		}
 	}
 
@@ -54,17 +61,29 @@ public partial class GameManager : Utils.SingletonNode<GameManager>
 	{
 		base._Process(delta);
 
+		// Cache mouse position once per frame for MovementComponent and others
+		if (EntityManager.Instance != null && EntityManager.Instance.ViewRoot is Node2D root2D)
+		{
+			Game.Utils.ViewContext.CachedMouseGlobalPosition = root2D.GetGlobalMousePosition();
+		}
+		else
+		{
+			Game.Utils.ViewContext.CachedMouseGlobalPosition = null;
+		}
+
 		// Trigger the frame event
 		Frame?.Invoke(delta);
 
-		// Tick progression
+		// Tick progression with spiral-of-death protection
 		if (TickRatePerSecond > 0)
 		{
-			_accumulatedTime += delta;
-			while (_accumulatedTime >= TickInterval)
+			_accumulatedTime = Math.Min(_accumulatedTime + delta, MaxAccumulatedTimeSeconds);
+			int ticksThisFrame = 0;
+			while (_accumulatedTime >= TickInterval && ticksThisFrame < MaxTicksPerFrame)
 			{
 				_accumulatedTime -= TickInterval;
 				Tick?.Invoke(TickInterval);
+				ticksThisFrame++;
 			}
 		}
 	}

@@ -21,6 +21,11 @@ public abstract class Entity : IUpdatableEntity
     /// </summary>
     public HashSet<Tag> Tags { get; } = [];
 
+    private TransformComponent2D _transform;
+    private VisualComponent _visual;
+    public TransformComponent2D Transform => _transform ??= GetComponent<TransformComponent2D>();
+    public VisualComponent Visual => _visual ??= GetComponent<VisualComponent>();
+
     /// <summary>
     /// Adds a tag to this entity.
     /// </summary>
@@ -118,6 +123,16 @@ public abstract class Entity : IUpdatableEntity
         _components[key] = component;
         component.Entity = this;
 
+        // Update caches for known component types
+        if (component is TransformComponent2D addedTransform)
+        {
+            _transform = addedTransform;
+        }
+        else if (component is VisualComponent addedVisual)
+        {
+            _visual = addedVisual;
+        }
+
         // Two-phase attachment for safe component initialization
         component.OnPreAttached();
 
@@ -151,6 +166,16 @@ public abstract class Entity : IUpdatableEntity
         _components[key] = component;
         component.Entity = this;
         component.OnPreAttached();
+
+        // Update caches for known component types
+        if (component is TransformComponent2D addedTransform)
+        {
+            _transform = addedTransform;
+        }
+        else if (component is VisualComponent addedVisual)
+        {
+            _visual = addedVisual;
+        }
 
         if (_isInitialized)
         {
@@ -191,6 +216,9 @@ public abstract class Entity : IUpdatableEntity
             {
                 _activeComponents.Remove(active);
             }
+            // Invalidate caches for known component types
+            if (typeof(T) == typeof(TransformComponent2D)) _transform = null;
+            else if (typeof(T) == typeof(VisualComponent)) _visual = null;
             return _components.Remove(typeof(T));
         }
         return false;
@@ -244,76 +272,11 @@ public abstract class Entity : IUpdatableEntity
         }
         _components.Clear();
         _activeComponents.Clear();
+        _transform = null;
+        _visual = null;
     }
 
-    /// <summary>
-    /// Factory: builds an Entity from an EntityBlueprint. If a non-empty ScenePath is resolved
-    /// and no VisualComponent is added by the blueprint, a VisualComponent is auto-added.
-    /// Does not set position or initialize; caller should set any initial state and then call Initialize().
-    /// </summary>
-    public static Entity From(EntityBlueprint blueprint)
-    {
-        // Plain concrete entity type (no inheritance tree required)
-        var entity = new PlainEntity();
-
-        // Base transform for 2D entities is just a TransformComponent2D in the blueprint chain.
-        foreach (var tag in blueprint.GetAllTags())
-        {
-            entity.AddTag(tag);
-        }
-
-        // Materialize all components
-        bool hasVisual = false;
-        var seenTypes = new HashSet<Type>();
-        var warnedTypes = new HashSet<Type>();
-        foreach (var comp in blueprint.CreateAllComponents())
-        {
-            var t = comp.GetType();
-            var policy = blueprint.GetDuplicatePolicy(t);
-            if (seenTypes.Contains(t))
-            {
-                switch (policy)
-                {
-                    case DuplicatePolicy.Prohibit:
-                        if (!warnedTypes.Contains(t))
-                        {
-                            GD.PushWarning($"Entity.From: Duplicate component {t.Name} in blueprint '{blueprint.Name}' prohibited; skipping.");
-                            warnedTypes.Add(t);
-                        }
-                        continue;
-                    case DuplicatePolicy.AllowMultiple:
-                        if (!warnedTypes.Contains(t))
-                        {
-                            GD.PushWarning($"Entity.From: Duplicate component {t.Name} allowed by policy but storage supports only one per type; replacing previous instance.");
-                            warnedTypes.Add(t);
-                        }
-                        break; // fall through to replacement behavior
-                    case DuplicatePolicy.Replace:
-                    default:
-                        break;
-                }
-            }
-
-            entity.AddComponent(comp);
-            seenTypes.Add(t);
-            if (comp is VisualComponent) hasVisual = true;
-        }
-
-        // If a ScenePath is resolved but no VisualComponent provided, add one
-        var scenePath = blueprint.ResolveScenePath();
-        if (!string.IsNullOrEmpty(scenePath) && !hasVisual)
-        {
-            entity.AddComponent(new VisualComponent(scenePath));
-        }
-
-        // Caller is responsible for setting transform data and calling Initialize()
-        return entity;
-    }
-
-    /// <summary>
-    /// Minimal concrete entity since Entity is abstract.
-    /// </summary>
-    private sealed class PlainEntity : Entity { }
+    // Note: Factory method moved to EntityFactory. Keep class minimal.
 }
 
 

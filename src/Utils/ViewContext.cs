@@ -20,6 +20,12 @@ public static class ViewContext
     public static PackedScene DefaultViewScene { get; set; }
 
     public static Vector2 DefaultScale { get; set; } = new(0.2f, 0.2f);
+
+    /// <summary>
+    /// Cached global mouse position for this frame, updated by the game loop.
+    /// Components may read this to avoid per-entity native calls.
+    /// </summary>
+    public static Vector2? CachedMouseGlobalPosition { get; set; }
 }
 
 

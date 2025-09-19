@@ -43,10 +43,15 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 	{
 		if (ViewNode != null && _transform2D != null)
 		{
-			// Use cached position component reference (local space for consistency)
-			ViewNode.Position = _transform2D.Position;
-			ViewNode.Rotation = _transform2D.Rotation;
-			ViewNode.Scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
+			var dirty = _transform2D.DirtyMask;
+			if ((dirty & TransformDirtyFlags.Position) != 0)
+				ViewNode.Position = _transform2D.Position;
+			if ((dirty & TransformDirtyFlags.Rotation) != 0)
+				ViewNode.Rotation = _transform2D.Rotation;
+			if ((dirty & TransformDirtyFlags.Scale) != 0)
+				ViewNode.Scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
+			if (dirty != TransformDirtyFlags.None)
+				_transform2D.ClearDirty(dirty);
 		}
 	}
 
