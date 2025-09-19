@@ -74,11 +74,28 @@ public abstract class Entity : IUpdatableEntity
     protected readonly List<IActiveComponent> _activeComponents = [];
 
     /// <summary>
+    /// Tracks whether this entity has completed initial attachment.
+    /// Controls whether newly added components should run OnPostAttached immediately.
+    /// </summary>
+    private bool _isInitialized;
+
+    /// <summary>
     /// Gets a component of the specified type, or null if not found.
     /// </summary>
     public T GetComponent<T>() where T : class, IComponent
     {
-        return _components.TryGetValue(typeof(T), out var component) ? (T)component : null;
+        if (_components.TryGetValue(typeof(T), out var component))
+        {
+            return (T)component;
+        }
+
+        // Polymorphic fallback: search for first component that implements T
+        foreach (var c in _components.Values)
+        {
+            if (c is T match) return match;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -88,11 +105,31 @@ public abstract class Entity : IUpdatableEntity
     public void AddComponent<T>(T component) where T : IComponent
     {
         var key = component.GetType();
+        if (_components.TryGetValue(key, out var existing))
+        {
+            if (existing is IActiveComponent existingActive)
+            {
+                _activeComponents.Remove(existingActive);
+            }
+            existing.OnDetached();
+            existing.Entity = null;
+        }
+
         _components[key] = component;
         component.Entity = this;
 
         // Two-phase attachment for safe component initialization
         component.OnPreAttached();
+
+        // If the entity is already initialized, complete attachment immediately
+        if (_isInitialized)
+        {
+            component.OnPostAttached();
+            if (component is IActiveComponent active)
+            {
+                _activeComponents.Add(active);
+            }
+        }
     }
 
     /// <summary>
@@ -101,9 +138,28 @@ public abstract class Entity : IUpdatableEntity
     public void AddComponent(IComponent component)
     {
         var key = component.GetType();
+        if (_components.TryGetValue(key, out var existing))
+        {
+            if (existing is IActiveComponent existingActive)
+            {
+                _activeComponents.Remove(existingActive);
+            }
+            existing.OnDetached();
+            existing.Entity = null;
+        }
+
         _components[key] = component;
         component.Entity = this;
         component.OnPreAttached();
+
+        if (_isInitialized)
+        {
+            component.OnPostAttached();
+            if (component is IActiveComponent active)
+            {
+                _activeComponents.Add(active);
+            }
+        }
     }
 
     /// <summary>
@@ -143,7 +199,15 @@ public abstract class Entity : IUpdatableEntity
     /// <summary>
     /// Checks if entity has a specific component.
     /// </summary>
-    public bool HasComponent<T>() where T : IComponent => _components.ContainsKey(typeof(T));
+    public bool HasComponent<T>() where T : IComponent
+    {
+        if (_components.ContainsKey(typeof(T))) return true;
+        foreach (var c in _components.Values)
+        {
+            if (c is T) return true;
+        }
+        return false;
+    }
 
 
     /// <summary>
@@ -151,6 +215,7 @@ public abstract class Entity : IUpdatableEntity
     /// </summary>
     public void Initialize()
     {
+        _isInitialized = true;
         CompleteAttachment();
     }
 
@@ -199,9 +264,38 @@ public abstract class Entity : IUpdatableEntity
 
         // Materialize all components
         bool hasVisual = false;
+        var seenTypes = new HashSet<Type>();
+        var warnedTypes = new HashSet<Type>();
         foreach (var comp in blueprint.CreateAllComponents())
         {
+            var t = comp.GetType();
+            var policy = blueprint.GetDuplicatePolicy(t);
+            if (seenTypes.Contains(t))
+            {
+                switch (policy)
+                {
+                    case DuplicatePolicy.Prohibit:
+                        if (!warnedTypes.Contains(t))
+                        {
+                            GD.PushWarning($"Entity.From: Duplicate component {t.Name} in blueprint '{blueprint.Name}' prohibited; skipping.");
+                            warnedTypes.Add(t);
+                        }
+                        continue;
+                    case DuplicatePolicy.AllowMultiple:
+                        if (!warnedTypes.Contains(t))
+                        {
+                            GD.PushWarning($"Entity.From: Duplicate component {t.Name} allowed by policy but storage supports only one per type; replacing previous instance.");
+                            warnedTypes.Add(t);
+                        }
+                        break; // fall through to replacement behavior
+                    case DuplicatePolicy.Replace:
+                    default:
+                        break;
+                }
+            }
+
             entity.AddComponent(comp);
+            seenTypes.Add(t);
             if (comp is VisualComponent) hasVisual = true;
         }
 

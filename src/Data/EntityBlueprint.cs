@@ -17,6 +17,8 @@ public sealed class EntityBlueprint
     public string ScenePath { get; init; } // null for headless
     public IReadOnlyCollection<Tag> Tags { get; init; } = Array.Empty<Tag>();
     public Func<IEnumerable<IComponent>> ComponentsFactory { get; init; } = () => Array.Empty<IComponent>();
+    public IReadOnlyCollection<Action<Entity>> Mutators { get; init; } = Array.Empty<Action<Entity>>();
+    public IReadOnlyDictionary<Type, DuplicatePolicy> DuplicatePolicies { get; init; } = new Dictionary<Type, DuplicatePolicy>();
 
     public EntityBlueprint(
         string name,
@@ -85,18 +87,77 @@ public sealed class EntityBlueprint
         string name,
         string scenePath = null,
         IEnumerable<Tag> addTags = null,
-        Func<IEnumerable<IComponent>> addComponents = null)
+        Func<IEnumerable<IComponent>> addComponents = null,
+        IEnumerable<Action<Entity>> addMutators = null,
+        IReadOnlyDictionary<Type, DuplicatePolicy> duplicatePolicies = null)
     {
         var tags = addTags is null ? Array.Empty<Tag>() : addTags.ToArray();
         Func<IEnumerable<IComponent>> factory = addComponents ?? (() => Array.Empty<IComponent>());
+        var mutators = addMutators is null ? Array.Empty<Action<Entity>>() : addMutators.ToArray();
+        var policies = duplicatePolicies ?? new Dictionary<Type, DuplicatePolicy>();
         return new EntityBlueprint(
             name: name,
             scenePath: scenePath,
             tags: tags,
             componentsFactory: factory,
             @base: this
-        );
+        )
+        {
+            Mutators = mutators,
+            DuplicatePolicies = policies
+        };
     }
+
+    public IEnumerable<Action<Entity>> GetAllMutators()
+    {
+        foreach (var bp in EnumerateRootToLeaf())
+        {
+            if (bp.Mutators == null) continue;
+            foreach (var m in bp.Mutators) yield return m;
+        }
+    }
+
+    public static Action<Entity> Mutate<T>(Action<T> mutate) where T : class, IComponent
+    {
+        if (mutate == null) throw new ArgumentNullException(nameof(mutate));
+        return entity =>
+        {
+            if (entity == null) return;
+            var c = entity.GetComponent<T>();
+            if (c != null) mutate(c);
+        };
+    }
+
+    public static Action<Entity> Mutate<T>(Action<T, Entity> mutate) where T : class, IComponent
+    {
+        if (mutate == null) throw new ArgumentNullException(nameof(mutate));
+        return entity =>
+        {
+            if (entity == null) return;
+            var c = entity.GetComponent<T>();
+            if (c != null) mutate(c, entity);
+        };
+    }
+
+    public DuplicatePolicy GetDuplicatePolicy(Type componentType)
+    {
+        DuplicatePolicy? policy = null;
+        foreach (var bp in EnumerateRootToLeaf())
+        {
+            if (bp.DuplicatePolicies != null && bp.DuplicatePolicies.TryGetValue(componentType, out var p))
+            {
+                policy = p;
+            }
+        }
+        return policy ?? DuplicatePolicy.Replace;
+    }
+}
+
+public enum DuplicatePolicy
+{
+    Replace,
+    Prohibit,
+    AllowMultiple
 }
 
 

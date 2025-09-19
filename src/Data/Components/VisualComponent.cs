@@ -14,6 +14,8 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 	public string ScenePath { get; set; } = ScenePath;
 	public Node ParentNode { get; set; } // optional injection by caller
 
+	public Vector2? ScaleMultiplier { get; set; }
+
 	public Sprite2D Sprite { get; private set; }
 	public string PendingSpritePath { get; set; }
 
@@ -41,10 +43,10 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 	{
 		if (ViewNode != null && _transform2D != null)
 		{
-			// Use cached position component reference (no type checking!)
-			ViewNode.GlobalPosition = _transform2D.Position;
-			ViewNode.GlobalRotation = _transform2D.Rotation;
-			ViewNode.Scale = _transform2D.Scale;
+			// Use cached position component reference (local space for consistency)
+			ViewNode.Position = _transform2D.Position;
+			ViewNode.Rotation = _transform2D.Rotation;
+			ViewNode.Scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
 		}
 	}
 
@@ -99,11 +101,11 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 				}
 			}
 
-			// Initial position sync
+			// Initial transform sync (local space)
 			if (ViewNode != null)
 			{
-				ViewNode.GlobalPosition = _transform2D.Position;
-				ViewNode.GlobalRotation = _transform2D.Rotation;
+				ViewNode.Position = _transform2D.Position;
+				ViewNode.Rotation = _transform2D.Rotation;
 				ViewNode.Scale = _transform2D.Scale;
 			}
 

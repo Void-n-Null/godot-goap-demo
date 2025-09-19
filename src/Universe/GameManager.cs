@@ -43,8 +43,11 @@ public partial class GameManager : Utils.SingletonNode<GameManager>
 		base._Ready();
 
         // Test spawn: a simple visual-only entity (Girl) with a sprite
-        var spawnPos = new Vector2(200, 200);
-        EntityManager.Instance.Spawn(Blueprints.Girl, spawnPos);
+		for (int i = 0; i < 10; i++)
+		{
+			var spawnPos = new Vector2(Random.Shared.Next(0, 1000), Random.Shared.Next(0, 1000));
+			EntityManager.Instance.Spawn(Blueprints.Girl, spawnPos);
+		}
 	}
 
 	public override void _Process(double delta)

@@ -114,20 +114,10 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// </summary>
 	public Entity Spawn(EntityBlueprint blueprint, Vector2? position = null)
 	{
-		var entity = Entity.From(blueprint);
-
-		// Set initial transform data if provided
-		if (position.HasValue)
-		{
-			var t = entity.GetComponent<TransformComponent2D>();
-			if (t != null) t.Position = position.Value;
-		}
+		var entity = EntityFactory.Create(blueprint, position);
 
 		// Register (views attach themselves inside VisualComponent)
 		RegisterEntity(entity);
-
-		// Complete attach
-		entity.Initialize();
 		return entity;
 	}
 }
