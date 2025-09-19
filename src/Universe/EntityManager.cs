@@ -49,6 +49,22 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		{
 			Utils.ViewContext.DefaultViewScene = DefaultViewScene;
 		}
+
+		// Ensure a BatchRenderer2D exists under the ViewRoot so batched visuals can register
+		if (Game.Data.Components.BatchRendererLocator.Renderer == null)
+		{
+			var batch = new Utils.BatchRenderer2D();
+			if (ViewRoot is Node2D vr2)
+			{
+				batch.Parent2D = vr2;
+				vr2.AddChild(batch);
+			}
+			else
+			{
+				AddChild(batch);
+			}
+			Game.Data.Components.BatchRendererLocator.Renderer = batch;
+		}
 	}
 
 	/// <summary>

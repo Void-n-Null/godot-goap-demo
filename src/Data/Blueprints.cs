@@ -19,6 +19,7 @@ public static class Blueprints
             { typeof(TransformComponent2D), DuplicatePolicy.Prohibit },
             // One visual per entity given current storage — prefer customization via mutators
             { typeof(VisualComponent), DuplicatePolicy.Prohibit },
+            { typeof(BatchedVisualComponent), DuplicatePolicy.Prohibit },
             // One movement logic per entity — prohibit duplicates
             { typeof(MovementComponent), DuplicatePolicy.Prohibit },
             // One health model per entity — prohibit duplicates
@@ -40,14 +41,17 @@ public static class Blueprints
         ]
     );
 
+    // Batched visual layer: entities will use BatchedVisualComponent
+    public static readonly EntityBlueprint BatchedVisualEntity2D = Entity2D.Derive(
+        name: "BatchedVisualEntity2D"
+    );
+
     // Girl: visual-only entity with sprite
-    public static readonly EntityBlueprint Girl = VisualEntity2D.Derive(
+    public static readonly EntityBlueprint Girl = BatchedVisualEntity2D.Derive(
         name: "Girl",
         addComponents: () => [
+            new BatchedVisualComponent(Resources.GetTexture("res://textures/Girl.png")) { ScaleMultiplier = new Vector2(0.2f, 0.2f) },
             new MovementComponent(MaxSpeed: 300f * Utils.Random.NextFloat(0.5f, 1.5f), Friction: 1f)
-        ],
-        addMutators: [
-            EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = "res://textures/Girl.png")
         ]
     );
 }

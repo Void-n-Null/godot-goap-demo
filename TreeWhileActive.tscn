@@ -1,0 +1,31 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://src/Universe/GameManager.cs" id="1_iiqvi"]
+[ext_resource type="Script" path="res://src/Universe/EntityManager.cs" id="2_0a7gt"]
+[ext_resource type="PackedScene" path="res://scenes/EntityVisuals/EntityView.tscn" id="3_nxt6d"]
+[ext_resource type="Script" path="res://src/Utils/BatchRenderer2D.cs" id="4_tnnpl"]
+[ext_resource type="Texture2D" path="res://textures/Girl.png" id="5_n6r7d"]
+
+[sub_resource type="CanvasItemMaterial" id="CanvasItemMaterial_01hsa"]
+
+[sub_resource type="MultiMesh" id="MultiMesh_g1k4o"]
+instance_count = 5000
+buffer = PackedFloat32Array(204.8, 0, 0, 35349.06, 0, 204.8, 0, 66749.98, ... Truncated)
+
+[node name="Game" type="Node2D"]
+script = ExtResource("1_iiqvi")
+
+[node name="EntityManager" type="Node" parent="." node_paths=PackedStringArray("ViewRoot")]
+script = ExtResource("2_0a7gt")
+ViewRoot = NodePath("../Entities")
+DefaultViewScene = ExtResource("3_nxt6d")
+
+[node name="Entities" type="Node2D" parent="."]
+
+[node name="_Node_2" type="Node" parent="Entities"]
+script = ExtResource("4_tnnpl")
+
+[node name="_MultiMeshInstance2D_3" type="MultiMeshInstance2D" parent="Entities"]
+material = SubResource("CanvasItemMaterial_01hsa")
+multimesh = SubResource("MultiMesh_g1k4o")
+texture = ExtResource("5_n6r7d")
