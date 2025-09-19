@@ -47,12 +47,20 @@ public partial class GameManager : SingletonNode<GameManager>
 		GD.Print("GameManager: Ready");
 		base._Ready();
 
-		// Test spawn: a few girls with random positions set after creation
+		// Ensure the TaskScheduler exists in the scene
+		if (!TaskScheduler.HasInstance)
+		{
+			AddChild(new TaskScheduler());
+		}
+
+
+		// Schedule spawn: girls after 60 ticks
 		for (int i = 0; i < 5000; i++)
 			SpawnEntity.Now(NPC.Girl, Utils.Random.NextVector2(-5000, 5000));
 		
-
-		// Spawn a few beds to test furniture blueprints
+			
+	
+		// Schedule a few beds to test furniture blueprints after 120 ticks
 		for (int i = 0; i < 20; i++)
 			SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-1000, 1000));
 		
