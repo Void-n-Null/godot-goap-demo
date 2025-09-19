@@ -16,6 +16,10 @@ public partial class CameraController2D : Camera2D
     [Export] public float ZoomLerpSpeed = 12.0f; // higher is snappier
     [Export] public float PanFriction = 6.0f; // higher slows quicker (per second)
     [Export] public float MaxPanSpeed = 50000.0f; // clamp world-units/sec
+    [Export] public float InertiaFrequency = 6.0f; // 1/s, critically-damped momentum feel
+    [Export] public float InertiaTravelSeconds = 0.35f; // lookahead distance = v * t on release
+    [Export] public float InertiaStopDistance = 0.5f; // stop when within this distance (world units)
+    [Export] public float InertiaStopSpeed = 5.0f; // stop when speed below (world-units/sec)
 
     private bool _isDragging = false;
     private Vector2 _dragAnchorWorld;
@@ -32,6 +36,9 @@ public partial class CameraController2D : Camera2D
     private bool _useFixedZoomAnchorDuringDrag = false;
     private Vector2 _zoomAnchorWorld;
     private Vector2 _zoomAnchorScreen;
+
+    private bool _inertiaActive = false;
+    private Vector2 _inertiaTarget = Vector2.Zero;
 
     public override void _Ready()
     {
@@ -60,11 +67,18 @@ public partial class CameraController2D : Camera2D
                     _lastMouseScreen = GetViewport().GetMousePosition();
                     _lastMouseValid = true;
                     _panVelocity = Vector2.Zero; // reset inertia on grab
+                    _inertiaActive = false; // cancel momentum when grabbing
                 }
                 else
                 {
                     _isDragging = false;
                     _lastMouseValid = false;
+                    // On release, compute a lookahead target for critically-damped momentum
+                    if (_panVelocity.LengthSquared() > 0.000001f && InertiaTravelSeconds > 0.0f)
+                    {
+                        _inertiaTarget = GlobalPosition + _panVelocity * InertiaTravelSeconds;
+                        _inertiaActive = true;
+                    }
                 }
             }
 
@@ -179,16 +193,41 @@ public partial class CameraController2D : Camera2D
             }
         }
 
-        // Apply inertia when not dragging
-        if (!_isDragging && _panVelocity.LengthSquared() > 0.000001f)
+        // Apply momentum when not dragging
+        if (!_isDragging)
         {
-            GlobalPosition += _panVelocity * (float)delta;
-            // exponential decay towards zero
-            float decay = Mathf.Exp(-PanFriction * (float)delta);
-            _panVelocity *= decay;
-            // stop when very small to avoid drift
-            if (_panVelocity.LengthSquared() < 0.000001f)
-                _panVelocity = Vector2.Zero;
+            // Critically-damped spring toward a fixed lookahead target for natural ease-out
+            if (_inertiaActive && InertiaFrequency > 0.0f && InertiaTravelSeconds > 0.0f)
+            {
+                float dt = (float)delta;
+                float omega = InertiaFrequency; // 1/s
+                float k = omega * omega;        // spring constant
+                float c = 2.0f * omega;         // critical damping
+
+                var toTarget = _inertiaTarget - GlobalPosition;
+                _panVelocity += toTarget * k * dt - _panVelocity * c * dt;
+
+                if (_panVelocity.Length() > MaxPanSpeed)
+                    _panVelocity = _panVelocity.Normalized() * MaxPanSpeed;
+
+                GlobalPosition += _panVelocity * dt;
+
+                if (toTarget.Length() <= InertiaStopDistance && _panVelocity.Length() <= InertiaStopSpeed)
+                {
+                    GlobalPosition = _inertiaTarget;
+                    _panVelocity = Vector2.Zero;
+                    _inertiaActive = false;
+                }
+            }
+            // Fallback to exponential friction if spring momentum disabled
+            else if (_panVelocity.LengthSquared() > 0.000001f)
+            {
+                GlobalPosition += _panVelocity * (float)delta;
+                float decay = Mathf.Exp(-PanFriction * (float)delta);
+                _panVelocity *= decay;
+                if (_panVelocity.LengthSquared() < 0.000001f)
+                    _panVelocity = Vector2.Zero;
+            }
         }
 
         // Update last-zoom and last anchor cache
