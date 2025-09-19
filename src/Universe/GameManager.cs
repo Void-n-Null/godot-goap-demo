@@ -1,15 +1,15 @@
 using Godot;
 using System;
-using Game.Data;
-using Game.Data.Components;
 using Game.Utils;
+using Game.Data.Blueprints;
+using Game.Data.Blueprints.Objects;
 
 namespace Game.Universe;
 
 /// <summary>
 /// A singleton class that manages the game logic.
 /// </summary>
-public partial class GameManager : Utils.SingletonNode<GameManager>
+public partial class GameManager : SingletonNode<GameManager>
 {
 	/// <summary>
 	/// Event that fires every physics tick. Subscribe to this to receive tick updates.
@@ -49,12 +49,13 @@ public partial class GameManager : Utils.SingletonNode<GameManager>
 
 		// Test spawn: a few girls with random positions set after creation
 		for (int i = 0; i < 5000; i++)
-		{
-			var entity = EntityManager.Instance.Spawn(Blueprints.Girl);
+			SpawnEntity.Now(NPC.Girl, Utils.Random.NextVector2(-5000, 5000));
+		
 
-			if (entity.Transform != null)
-				entity.Transform.Position = Utils.Random.NextVector2(-5000, 5000);
-		}
+		// Spawn a few beds to test furniture blueprints
+		for (int i = 0; i < 20; i++)
+			SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-1000, 1000));
+		
 	}
 
 	public override void _Process(double delta)
@@ -64,11 +65,11 @@ public partial class GameManager : Utils.SingletonNode<GameManager>
 		// Cache mouse position once per frame for MovementComponent and others
 		if (EntityManager.Instance != null && EntityManager.Instance.ViewRoot is Node2D root2D)
 		{
-			Game.Utils.ViewContext.CachedMouseGlobalPosition = root2D.GetGlobalMousePosition();
+			ViewContext.CachedMouseGlobalPosition = root2D.GetGlobalMousePosition();
 		}
 		else
 		{
-			Game.Utils.ViewContext.CachedMouseGlobalPosition = null;
+			ViewContext.CachedMouseGlobalPosition = null;
 		}
 
 		// Trigger the frame event

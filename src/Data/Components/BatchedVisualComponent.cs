@@ -15,6 +15,8 @@ public class BatchedVisualComponent(Texture2D Texture, string ScenePath = null) 
     private TransformComponent2D _transform2D;
     private ulong _instanceId;
 
+    public ulong InstanceId => _instanceId;
+
     public Entity Entity { get; set; }
 
     public void Update(double delta)

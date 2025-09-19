@@ -15,6 +15,9 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 	public Node ParentNode { get; set; } // optional injection by caller
 
 	public Vector2? ScaleMultiplier { get; set; }
+		public bool YBasedZIndex { get; set; } = true;
+		public float ZIndexScale { get; set; } = 1f; // multiply Y by this before converting to int
+		public int ZIndexOffset { get; set; } = 0; // constant offset for layering
 
 	public Sprite2D Sprite { get; private set; }
 	public string PendingSpritePath { get; set; }
@@ -50,6 +53,14 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 				ViewNode.Rotation = _transform2D.Rotation;
 			if ((dirty & TransformDirtyFlags.Scale) != 0)
 				ViewNode.Scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
+
+			// Height-based Z indexing
+			if (YBasedZIndex)
+			{
+				int z = ZIndexOffset + (int)Mathf.Round(_transform2D.Position.Y * ZIndexScale);
+				z = Mathf.Clamp(z, -4096, 4095);
+				if (ViewNode.ZIndex != z) ViewNode.ZIndex = z;
+			}
 			if (dirty != TransformDirtyFlags.None)
 				_transform2D.ClearDirty(dirty);
 		}
@@ -112,6 +123,12 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 				ViewNode.Position = _transform2D.Position;
 				ViewNode.Rotation = _transform2D.Rotation;
 				ViewNode.Scale = _transform2D.Scale;
+				if (YBasedZIndex)
+				{
+					int z = ZIndexOffset + (int)Mathf.Round(_transform2D.Position.Y * ZIndexScale);
+					z = Mathf.Clamp(z, -4096, 4095);
+					ViewNode.ZIndex = z;
+				}
 			}
 
 			// Apply pending sprite if provided
