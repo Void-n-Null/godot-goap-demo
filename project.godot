@@ -18,3 +18,7 @@ config/icon="res://textures/icon.svg"
 [dotnet]
 
 project/assembly_name="godot-goap-demo"
+
+[editor]
+
+version_control/autoload_on_startup=true

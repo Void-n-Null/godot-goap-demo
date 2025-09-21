@@ -11,6 +11,7 @@ namespace Game.Universe;
 /// </summary>
 public partial class GameManager : SingletonNode<GameManager>
 {
+	[Export] public bool DebugMode = false;
 	/// <summary>
 	/// Event that fires every physics tick. Subscribe to this to receive tick updates.
 	/// </summary>
@@ -47,6 +48,12 @@ public partial class GameManager : SingletonNode<GameManager>
 		GD.Print("GameManager: Ready");
 		base._Ready();
 
+		if (DebugMode)
+		{
+			GD.Print("GameManager: DebugMode enabled");
+			AddChild(new StatsOverlay());
+		}
+
 		// Ensure the TaskScheduler exists in the scene
 		if (!TaskScheduler.HasInstance)
 		{
@@ -55,14 +62,14 @@ public partial class GameManager : SingletonNode<GameManager>
 
 
 		// Schedule spawn: girls after 60 ticks
-		for (int i = 0; i < 5000; i++)
-			SpawnEntity.Now(NPC.Girl, Utils.Random.NextVector2(-5000, 5000));
+		for (int i = 0; i < 10; i++)
+			SpawnEntity.Now(NPC.GirlYSorted, Utils.Random.NextVector2(-5000, 5000));
 		
 			
 	
 		// Schedule a few beds to test furniture blueprints after 120 ticks
-		for (int i = 0; i < 20; i++)
-			SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-1000, 1000));
+		for (int i = 0; i < 8000; i++)
+			SpawnEntity.Now(Furniture.BedYSorted, Utils.Random.NextVector2(-1000, 1000));
 		
 	}
 

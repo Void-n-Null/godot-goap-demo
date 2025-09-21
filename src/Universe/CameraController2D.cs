@@ -1,252 +1,227 @@
+using Game.Utils;
 using Godot;
-using System;
 
 namespace Game.Universe;
 
 /// <summary>
-/// Camera2D controller that provides pixel-perfect drag panning and cursor-anchored smooth zoom.
-/// The world point under the cursor remains under the cursor while panning or zooming.
+/// Advanced, modular Camera2D controller built feature-by-feature with explicit requirements.
+/// Each feature is implemented in isolation and verified against a compatibility matrix.
 /// </summary>
 public partial class CameraController2D : Camera2D
 {
-    [Export] public MouseButton PanButton = MouseButton.Middle;
-    [Export] public float MinZoom = 0.1f;
-    [Export] public float MaxZoom = 8.0f;
-    [Export] public float ZoomStepFactor = 1.2f; // multiplicative per wheel notch
-    [Export] public float ZoomLerpSpeed = 12.0f; // higher is snappier
-    [Export] public float PanFriction = 6.0f; // higher slows quicker (per second)
-    [Export] public float MaxPanSpeed = 50000.0f; // clamp world-units/sec
-    [Export] public float InertiaFrequency = 6.0f; // 1/s, critically-damped momentum feel
-    [Export] public float InertiaTravelSeconds = 0.35f; // lookahead distance = v * t on release
-    [Export] public float InertiaStopDistance = 0.5f; // stop when within this distance (world units)
-    [Export] public float InertiaStopSpeed = 5.0f; // stop when speed below (world-units/sec)
+	// Configuration (subject to refinement per feature)
+	[Export] public MouseButton PanButton = MouseButton.Middle;
 
-    private bool _isDragging = false;
-    private Vector2 _dragAnchorWorld;
-    private Vector2 _panVelocity = Vector2.Zero; // world-units/sec
-    private Vector2 _lastMouseScreen;
-    private bool _lastMouseValid = false;
+	// Zoom config
+	[Export] public float MinZoom = 0.1f;
+	[Export] public float MaxZoom = 8.0f;
+	[Export] public float ZoomStepFactor = 1.2f; // multiplicative per wheel notch
+	[Export] public float ZoomLerpSpeed = 12.0f; // exponential smoothing speed
 
-    private bool _isZooming = false;
-    private float _targetZoomScalar;
-    private float _lastDelta = 1.0f;
-    private float _lastZoomScalar = -1.0f;
-    private Vector2 _lastAnchorScreen;
-    private Vector2 _lastAnchorWorld;
-    private bool _useFixedZoomAnchorDuringDrag = false;
-    private Vector2 _zoomAnchorWorld;
-    private Vector2 _zoomAnchorScreen;
+	// Inertia config (exponential friction decay; v *= exp(-k * dt))
+	[Export] public float InertiaFriction = 6.0f; // 1/s
+	[Export] public float InertiaDeadZonePixels = 20.0f; // minimum cursor travel from drag start before inertia is allowed
+	[Export] public float InertiaMinSpeed = 10.0f; // world-units/sec below which inertia is ignored
+	[Export] public float InertiaMaxSpeed = 20000.0f; // clamp world-units/sec to avoid spikes
 
-    private bool _inertiaActive = false;
-    private Vector2 _inertiaTarget = Vector2.Zero;
+	private const float MinDelta = 1e-4f;
+	private const float SnapEpsilon = 0.0005f;
 
-    public override void _Ready()
-    {
-        base._Ready();
-        // Ensure uniform zoom
-        if (!Mathf.IsEqualApprox(Zoom.X, Zoom.Y))
-            Zoom = new Vector2(Zoom.X, Zoom.X);
+	// Internal state
+	private bool _isDragging;
+	private Vector2 _dragAnchorWorld;
+	private Vector2 _dragStartMouseScreen;
+	private bool _passedDeadZone;
+	private Vector2 _lastDragInstantVelocity = Vector2.Zero;
 
-        _targetZoomScalar = Zoom.X;
-        _lastZoomScalar = Zoom.X;
-        _lastAnchorScreen = GetViewport().GetMousePosition();
-        _lastAnchorWorld = ScreenToWorld(_lastAnchorScreen);
-    }
+	private bool _isZooming;
+	private float _targetZoomScalar = 1.0f;
+	private bool _shouldApplyInertia => !_isDragging && !_isZooming && _inertiaActive;
 
-    public override void _UnhandledInput(InputEvent @event)
-    {
-        // Start/stop drag panning
-        if (@event is InputEventMouseButton mouseButton)
-        {
-            if (mouseButton.ButtonIndex == PanButton)
-            {
-                if (mouseButton.Pressed)
-                {
-                    _isDragging = true;
-                    _dragAnchorWorld = GetGlobalMousePosition();
-                    _lastMouseScreen = GetViewport().GetMousePosition();
-                    _lastMouseValid = true;
-                    _panVelocity = Vector2.Zero; // reset inertia on grab
-                    _inertiaActive = false; // cancel momentum when grabbing
-                }
-                else
-                {
-                    _isDragging = false;
-                    _lastMouseValid = false;
-                    // On release, compute a lookahead target for critically-damped momentum
-                    if (_panVelocity.LengthSquared() > 0.000001f && InertiaTravelSeconds > 0.0f)
-                    {
-                        _inertiaTarget = GlobalPosition + _panVelocity * InertiaTravelSeconds;
-                        _inertiaActive = true;
-                    }
-                }
-            }
+	// When zooming during a drag, fix the zoom anchor to the world point from the first wheel event
+	private bool _useFixedZoomAnchorDuringDrag;
+	private Vector2 _zoomAnchorWorld;
 
-            // Wheel zoom with cursor anchor
-            if (mouseButton.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
-            {
-                var current = _targetZoomScalar;
-                if (mouseButton.ButtonIndex == MouseButton.WheelUp)
-                    current *= ZoomStepFactor; // zoom in
-                else
-                    current /= ZoomStepFactor; // zoom out
+	// Inertia state (velocity decays exponentially)
+	private bool _inertiaActive;
+	private Vector2 _inertiaVelocity = Vector2.Zero;
 
-                _targetZoomScalar = Mathf.Clamp(current, MinZoom, MaxZoom);
-                _isZooming = true;
+	public override void _Ready()
+	{
+		base._Ready();
+		// Ensure uniform zoom scaling from the start
+		if (!Mathf.IsEqualApprox(Zoom.X, Zoom.Y))
+			Zoom = new Vector2(Zoom.X, Zoom.X);
+		_targetZoomScalar = Zoom.X;
+	}
 
-                // If we're dragging, capture a fixed anchor (event-time)
-                if (_isDragging)
-                {
-                    _useFixedZoomAnchorDuringDrag = true;
-                    // When dragging, zoom should keep the original drag anchor under the current cursor
-                    _zoomAnchorWorld = _dragAnchorWorld;
-                }
-                else
-                {
-                    _useFixedZoomAnchorDuringDrag = false;
-                }
-            }
-        }
-    }
+	public override void _UnhandledInput(InputEvent @event)
+	{
+		switch (@event)
+		{
+			case InputEventMouseButton mouse:
+			{
+				if (mouse.ButtonIndex == PanButton)
+					if (mouse.Pressed) 
+						HandleDragStart(); 
+					else 
+						HandleDragEnd();
 
-    public override void _Process(double delta)
-    {
-        base._Process(delta);
-        _lastDelta = (float)delta;
-        var currentMouseScreen = GetViewport().GetMousePosition();
+				// Zoom: WheelUp zooms in (decrease scalar), WheelDown zooms out (increase scalar)
+				if (mouse.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
+					HandleZooming(mouse);   
+				break;
+			}
+			// Allow ESC to cancel an active drag (future: bind to a custom action)
+			case InputEventKey { Echo: false, Pressed: true, Keycode: Key.Escape }:
+				HandleHardDragEnd();
+				break;
+		}
+	}
 
-        // If zoom changed externally (not via our smooth step), keep the last cursor world point fixed
-        if (!_isZooming && !Mathf.IsEqualApprox(Zoom.X, _lastZoomScalar))
-        {
-            // Correct position so the cursor-anchored world point stays fixed
-            var anchorAfter = GetGlobalMousePosition();
-            GlobalPosition += _lastAnchorWorld - anchorAfter;
-        }
+	private void HandleZooming(InputEventMouseButton mouse)
+	{
+		var next = _targetZoomScalar;
+		next = mouse.ButtonIndex == MouseButton.WheelDown
+			? next / ZoomStepFactor
+			: next * ZoomStepFactor;
+		_targetZoomScalar = Mathf.Clamp(next, MinZoom, MaxZoom);
+		_isZooming = true;
 
-        // Smooth zoom towards target; during drag use fixed event-time anchor, otherwise live cursor anchor
-        if (_isZooming)
-        {
-            // Live anchor world point before zoom (used when not using fixed drag anchor)
-            var anchorWorldBefore = GetGlobalMousePosition();
+		// Zoom during inertia overrides inertia
+		if (_inertiaActive && !_isDragging)
+		{
+			_inertiaActive = false;
+			_inertiaVelocity = Vector2.Zero;
+		}
 
-            float current = Zoom.X;
-            float next = Mathf.Lerp(current, _targetZoomScalar, 1.0f - Mathf.Exp(-ZoomLerpSpeed * (float)delta));
+		// If we are dragging when zoom starts, capture a fixed anchor until drag ends
+		if (_isDragging && !_useFixedZoomAnchorDuringDrag)
+		{
+			_useFixedZoomAnchorDuringDrag = true;
+			_zoomAnchorWorld = GetGlobalMousePosition();
+		}
+	}
 
-            // Snap when close enough
-            if (Mathf.Abs(next - _targetZoomScalar) < 0.0005f)
-            {
-                next = _targetZoomScalar;
-                _isZooming = false;
-            }
+	private void HandleDragStart(){
+		_isDragging = true;
+		_dragAnchorWorld = GetGlobalMousePosition();
+		_dragStartMouseScreen = GetViewport().GetMousePosition();
+		_passedDeadZone = false;
+		_lastDragInstantVelocity = Vector2.Zero;
+	}
 
-            Zoom = new Vector2(next, next);
-            if (_isDragging && _useFixedZoomAnchorDuringDrag)
-            {
-                // During drag, keep the original drag anchor under the live cursor position
-                // Calculate where the camera should be so that _zoomAnchorWorld appears at currentMouseScreen
-                var currentMouseWorld = GetGlobalMousePosition();
-                var offset = _zoomAnchorWorld - currentMouseWorld;
-                GlobalPosition += offset;
-            }
-            else
-            {
-                // Correct any drift so the live world point under the cursor remains fixed
-                var anchorWorldAfter = GetGlobalMousePosition();
-                GlobalPosition += anchorWorldBefore - anchorWorldAfter;
-            }
-        }
+	private void HandleDragEnd(){
+		_isDragging = false;
+		_useFixedZoomAnchorDuringDrag = false; // clear fixed anchor on drag end
 
-        // Drag panning: keep the world point grabbed at press under the cursor exactly
-        if (_isDragging)
-        {
-            // Track mouse movement for velocity calculation
-            var mouseScreen = GetViewport().GetMousePosition();
-            if (_lastMouseValid)
-            {
-                // For velocity, use world-space movement independent of current zoom
-                var currentMouseWorld = GetGlobalMousePosition();
-                var lastMouseWorld = ScreenToWorld(_lastMouseScreen);
-                var worldDelta = currentMouseWorld - lastMouseWorld;
-                var instantaneous = worldDelta / Math.Max(_lastDelta, 0.0001f);
-                instantaneous = instantaneous.Length() > MaxPanSpeed
-                    ? instantaneous.Normalized() * MaxPanSpeed
-                    : instantaneous;
-                _panVelocity = instantaneous;
-            }
-            _lastMouseScreen = mouseScreen;
-            _lastMouseValid = true;
+		// Start inertia if we have velocity, dead zone passed
+		var speed = _lastDragInstantVelocity.Length();
+		if (_passedDeadZone && speed >= InertiaMinSpeed)
+		{
+			_inertiaActive = true;
+			_inertiaVelocity = _lastDragInstantVelocity.ClampMaxLength(InertiaMaxSpeed);
+		}
+		else
+		{
+			_inertiaActive = false;
+			_inertiaVelocity = Vector2.Zero;
+		}
+	}
 
-            // Only directly move camera if not in zoom correction path
-            if (!(_isZooming && _useFixedZoomAnchorDuringDrag))
-            {
-                var currentMouseWorld = GetGlobalMousePosition();
-                var worldDelta = _dragAnchorWorld - currentMouseWorld;
-                if (worldDelta.LengthSquared() > 0.0f)
-                {
-                    GlobalPosition += worldDelta;
-                    var instantaneous = worldDelta / Math.Max(_lastDelta, 0.0001f);
-                    instantaneous = instantaneous.Length() > MaxPanSpeed
-                        ? instantaneous.Normalized() * MaxPanSpeed
-                        : instantaneous;
-                    _panVelocity = instantaneous;
-                }
-            }
-        }
+	private void HandleHardDragEnd(){
+		_isDragging = false;
+		_useFixedZoomAnchorDuringDrag = false;
+		_inertiaActive = false;
+		_inertiaVelocity = Vector2.Zero;
+		_passedDeadZone = false;
+		_lastDragInstantVelocity = Vector2.Zero;
+	}
 
-        // Apply momentum when not dragging
-        if (!_isDragging)
-        {
-            // Critically-damped spring toward a fixed lookahead target for natural ease-out
-            if (_inertiaActive && InertiaFrequency > 0.0f && InertiaTravelSeconds > 0.0f)
-            {
-                float dt = (float)delta;
-                float omega = InertiaFrequency; // 1/s
-                float k = omega * omega;        // spring constant
-                float c = 2.0f * omega;         // critical damping
+	public override void _Process(double delta)
+	{
+		var frameGlobalMousePosition = GetGlobalMousePosition();
+		var frameScreenMousePosition = GetViewport().GetMousePosition();
+		base._Process(delta);
+		var dt = (float)delta;
+		if (dt <= 0) return;
+		if (_isDragging) // 1) Pixel-perfect drag panning: translate first and compute instantaneous velocity
+			StepDrag(dt, frameGlobalMousePosition, frameScreenMousePosition);
+		if (_isZooming) // 2) Smooth cursor-anchored zoom (use fixed anchor while dragging)
+			StepZoom(dt, frameGlobalMousePosition);
+		if (_shouldApplyInertia)  // 3) Inertia: only when not dragging and not zooming (zoom overrides inertia)
+			StepInertia(dt);
+	}
 
-                var toTarget = _inertiaTarget - GlobalPosition;
-                _panVelocity += toTarget * k * dt - _panVelocity * c * dt;
+	private void StepDrag(float dt, Vector2 frameGlobalMousePosition, Vector2 frameScreenMousePosition)
+	{
+		var offset = _dragAnchorWorld - frameGlobalMousePosition;
+		if (offset.LengthSquared() > 0.0f)
+		{
+			GlobalPosition += offset;
+			var v = offset / Mathf.Max(dt, MinDelta);
+			_lastDragInstantVelocity = v.ClampMaxLength(InertiaMaxSpeed);
+		}
+		else
+		{
+			_lastDragInstantVelocity = Vector2.Zero;
+		}
 
-                if (_panVelocity.Length() > MaxPanSpeed)
-                    _panVelocity = _panVelocity.Normalized() * MaxPanSpeed;
+		if (!_passedDeadZone)
+		{
+			if ((frameScreenMousePosition - _dragStartMouseScreen).Length() >= InertiaDeadZonePixels)
+				_passedDeadZone = true;
+		}
+	}
 
-                GlobalPosition += _panVelocity * dt;
+	private void StepZoom(float dt, Vector2 frameGlobalMousePosition)
+	{
+		var current = Zoom.X;
+		var next = Mathf.Lerp(current, _targetZoomScalar, 1.0f - Mathf.Exp(-ZoomLerpSpeed * dt));
+		var reached = Mathf.Abs(next - _targetZoomScalar) < SnapEpsilon;
+		if (reached)
+			next = _targetZoomScalar;
 
-                if (toTarget.Length() <= InertiaStopDistance && _panVelocity.Length() <= InertiaStopSpeed)
-                {
-                    GlobalPosition = _inertiaTarget;
-                    _panVelocity = Vector2.Zero;
-                    _inertiaActive = false;
-                }
-            }
-            // Fallback to exponential friction if spring momentum disabled
-            else if (_panVelocity.LengthSquared() > 0.000001f)
-            {
-                GlobalPosition += _panVelocity * (float)delta;
-                float decay = Mathf.Exp(-PanFriction * (float)delta);
-                _panVelocity *= decay;
-                if (_panVelocity.LengthSquared() < 0.000001f)
-                    _panVelocity = Vector2.Zero;
-            }
-        }
+		// Compute correction
+		Vector2 correction;
+		if (_isDragging && _useFixedZoomAnchorDuringDrag)
+		{
+			// Keep the initially captured world point under the cursor while dragging
+			var before = _zoomAnchorWorld;
+			Zoom = new Vector2(next, next);
+			var after = GetGlobalMousePosition();
+			correction = before - after;
+		}
+		else
+		{
+			var before = GetGlobalMousePosition();
+			Zoom = new Vector2(next, next);
+			var after = GetGlobalMousePosition();
+			correction = before - after;
+		}
 
-        // Update last-zoom and last anchor cache
-        _lastZoomScalar = Zoom.X;
-        _lastAnchorScreen = currentMouseScreen;
-        _lastAnchorWorld = ScreenToWorld(currentMouseScreen);
-    }
+		GlobalPosition += correction;
 
-    private Vector2 ScreenToWorld(Vector2 screen)
-    {
-        // world = (screen - half_view) * zoom + camera_position
-        return ScreenOffset(screen) * Zoom + GlobalPosition;
-    }
+		if (reached)
+			// Keep fixed anchor until drag ends; it will be cleared on drag release
+			_isZooming = false;
+	}
 
-    private Vector2 ScreenOffset(Vector2 screen)
-    {
-        var half = GetViewport().GetVisibleRect().Size * 0.5f;
-        return screen - half;
-    }
+	private void StepInertia(float dt)
+	{
+		if (!_inertiaActive)
+			return;
+
+		// Apply velocity and decay exponentially
+		GlobalPosition += _inertiaVelocity * dt;
+		var decay = Mathf.Exp(-InertiaFriction * dt);
+		_inertiaVelocity *= decay;
+
+		// Clamp and stop under threshold
+		_inertiaVelocity = _inertiaVelocity.ClampMaxLength(InertiaMaxSpeed);
+		if (!(_inertiaVelocity.Length() < InertiaMinSpeed)) return;
+		
+		_inertiaVelocity = Vector2.Zero;
+		_inertiaActive = false;
+	}
 }
-
-
