@@ -4,7 +4,7 @@ using Game.Utils;
 namespace Game.Data.Components;
 
 /// <summary>
-/// Visual component backed by YSortedRenderer2D (immediate mode). No per-entity nodes.
+/// Visual component backed by CustomEntityRenderEngine (immediate mode). No per-entity nodes.
 /// </summary>
 public class YSortedVisualComponent(Texture2D Texture, Vector2? ScaleMultiplier = null) : IActiveComponent
 {
@@ -23,7 +23,7 @@ public class YSortedVisualComponent(Texture2D Texture, Vector2? ScaleMultiplier 
         if (dirty == TransformDirtyFlags.None) return;
 
         var scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
-        YSortedRendererLocator.Renderer?.UpdateSprite(_id, _transform2D.Position, _transform2D.Rotation, scale);
+        CustomEntityRenderEngineLocator.Renderer?.UpdateSprite(_id, _transform2D.Position, _transform2D.Rotation, scale);
         _transform2D.ClearDirty(dirty);
     }
 
@@ -34,7 +34,7 @@ public class YSortedVisualComponent(Texture2D Texture, Vector2? ScaleMultiplier 
         _transform2D = Entity.GetComponent<TransformComponent2D>();
         if (_transform2D == null || Texture == null) return;
         var scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
-        _id = YSortedRendererLocator.Renderer?.AddSprite(Texture, _transform2D.Position, _transform2D.Rotation, scale) ?? 0UL;
+        _id = CustomEntityRenderEngineLocator.Renderer?.AddSprite(Texture, _transform2D.Position, _transform2D.Rotation, scale) ?? 0UL;
         _transform2D.ClearDirty(TransformDirtyFlags.All);
     }
 
@@ -42,7 +42,7 @@ public class YSortedVisualComponent(Texture2D Texture, Vector2? ScaleMultiplier 
     {
         if (_id != 0UL)
         {
-            YSortedRendererLocator.Renderer?.RemoveSprite(_id);
+            CustomEntityRenderEngineLocator.Renderer?.RemoveSprite(_id);
             _id = 0UL;
         }
         _transform2D = null;

@@ -18,8 +18,6 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	public Node ViewRoot { get; set; }
 	[Export]
 	public PackedScene DefaultViewScene { get; set; }
-	[Export]
-	public bool EnableBatchRenderer { get; set; } = false;
 	/// <summary>
 	/// Maximum entities to prevent memory issues.
 	/// </summary>
@@ -53,26 +51,12 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		}
 
 
-		// Optionally create a BatchRenderer2D if explicitly enabled
-		if (EnableBatchRenderer && Game.Data.Components.BatchRendererLocator.Renderer == null)
-		{
-			var batch = new Utils.BatchRenderer2D();
-			if (ViewRoot is Node2D vr2)
-			{
-				batch.Parent2D = vr2;
-				vr2.AddChild(batch);
-			}
-			else
-			{
-				AddChild(batch);
-			}
-			Game.Data.Components.BatchRendererLocator.Renderer = batch;
-		}
 
-		// Ensure a YSortedRenderer2D exists for immediate-mode rendering if desired
-		if (Utils.YSortedRendererLocator.Renderer == null)
+
+		// Ensure a CustomEntityRenderEngine exists for immediate-mode rendering
+		if (Utils.CustomEntityRenderEngineLocator.Renderer == null)
 		{
-			var ysorted = new Utils.YSortedRenderer2D();
+			var ysorted = new Utils.CustomEntityRenderEngine();
 			if (ViewRoot is Node2D vr2b)
 				vr2b.AddChild(ysorted);
 			else

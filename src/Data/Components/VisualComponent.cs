@@ -10,171 +10,80 @@ namespace Game.Data.Components;
 /// </summary>
 public class VisualComponent(string ScenePath = null) : IActiveComponent
 {
+	// Immediate-mode version using CustomEntityRenderEngine; legacy node fields kept for compatibility
 	public Node2D ViewNode { get; private set; }
 	public string ScenePath { get; set; } = ScenePath;
-	public Node ParentNode { get; set; } // optional injection by caller
+	public Node ParentNode { get; set; }
 
 	public Vector2? ScaleMultiplier { get; set; }
-		public bool YBasedZIndex { get; set; } = true;
-		public float ZIndexScale { get; set; } = 1f; // multiply Y by this before converting to int
-		public int ZIndexOffset { get; set; } = 0; // constant offset for layering
+	public bool YBasedZIndex { get; set; } = true;
+	public float ZIndexScale { get; set; } = 1f;
+	public int ZIndexOffset { get; set; } = 0;
 
 	public Sprite2D Sprite { get; private set; }
 	public string PendingSpritePath { get; set; }
 
-	// Cached reference to position component (set in PostAttached)
 	private TransformComponent2D _transform2D;
-	
+	private ulong _id;
+
 	public Entity Entity { get; set; }
 
 	public void SetSprite(string path)
 	{
-		SetSprite(Resources.GetTexture(path));
+		var texture = Resources.GetTexture(path);
+		if (texture == null) return;
+		if (_id != 0UL)
+			CustomEntityRenderEngineLocator.Renderer?.UpdateSpriteTexture(_id, texture);
+		// Maintain legacy Sprite node field for external code; but no node is created.
 	}
 
 	public void SetSprite(Texture2D texture)
 	{
 		if (texture == null) return;
-		EnsureSpriteNode();
-		if (Sprite != null)
-		{
-			Sprite.Texture = texture;
-		}
+		if (_id != 0UL)
+			CustomEntityRenderEngineLocator.Renderer?.UpdateSpriteTexture(_id, texture);
 	}
 
 	public void Update(double delta)
 	{
-		if (ViewNode != null && _transform2D != null)
-		{
-			var dirty = _transform2D.DirtyMask;
-			if ((dirty & TransformDirtyFlags.Position) != 0)
-				ViewNode.Position = _transform2D.Position;
-			if ((dirty & TransformDirtyFlags.Rotation) != 0)
-				ViewNode.Rotation = _transform2D.Rotation;
-			if ((dirty & TransformDirtyFlags.Scale) != 0)
-				ViewNode.Scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
-
-			// Height-based Z indexing
-			if (YBasedZIndex)
-			{
-				int z = ZIndexOffset + (int)Mathf.Round(_transform2D.Position.Y * ZIndexScale);
-				z = Mathf.Clamp(z, -4096, 4095);
-				if (ViewNode.ZIndex != z) ViewNode.ZIndex = z;
-			}
-			if (dirty != TransformDirtyFlags.None)
-				_transform2D.ClearDirty(dirty);
-		}
+		if (_id == 0UL || _transform2D == null) return;
+		var dirty = _transform2D.DirtyMask;
+		if (dirty == TransformDirtyFlags.None) return;
+		var scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
+		CustomEntityRenderEngineLocator.Renderer?.UpdateSprite(_id, _transform2D.Position, _transform2D.Rotation, scale);
+		_transform2D.ClearDirty(dirty);
 	}
 
 	public void OnPreAttached()
 	{
-		// Phase 1: Create the visual node
-		if (!string.IsNullOrEmpty(ScenePath))
-		{
-			var scene = GD.Load<PackedScene>(ScenePath);
-			ViewNode = scene.Instantiate<Node2D>();
-		}
-		else if (ViewContext.DefaultViewScene != null)
-		{
-			ViewNode = ViewContext.DefaultViewScene.Instantiate<Node2D>();
-		}
-		else
-		{
-			// Fallback: create a simple Node2D with a Sprite2D child named "Sprite"
-			var node = new Node2D();
-			var sprite = new Sprite2D();
-			sprite.Name = "Sprite";
-			node.AddChild(sprite);
-			ViewNode = node;
-		}
-
-		// Cache Sprite2D reference from root or child
-		Sprite = (ViewNode as Sprite2D) ?? ViewNode.GetNodeOrNull<Sprite2D>("Sprite") ?? FindFirstSprite(ViewNode);
-
-		// Add to scene (but don't sync position yet)
-		// Note: This assumes EntityManager is available - might need adjustment
-		// depending on how this is used
+		// No node creation; wait for transform and sprite path
 	}
 
 	public void OnPostAttached()
 	{
-		// Phase 2: All components attached, safe to get position component
 		_transform2D = Entity.GetComponent<TransformComponent2D>();
+		if (_transform2D == null) return;
 
-		if (_transform2D == null)
-		{
-			GD.PushWarning($"VisualComponent: No Transform2D found on entity {Entity.Id}. Visual sync disabled.");
-		}
-		else
-		{
-			// Ensure the view is in the scene tree
-			if (ViewNode != null && ViewNode.GetParent() == null)
-			{
-				var parent = ParentNode ?? ViewContext.DefaultParent;
-				if (parent != null)
-				{
-					parent.AddChild(ViewNode);
-				}
-			}
+		// Choose initial texture
+		Texture2D texture = null;
+		if (!string.IsNullOrEmpty(PendingSpritePath))
+			texture = Resources.GetTexture(PendingSpritePath);
 
-			// Initial transform sync (local space)
-			if (ViewNode != null)
-			{
-				ViewNode.Position = _transform2D.Position;
-				ViewNode.Rotation = _transform2D.Rotation;
-				ViewNode.Scale = _transform2D.Scale;
-				if (YBasedZIndex)
-				{
-					int z = ZIndexOffset + (int)Mathf.Round(_transform2D.Position.Y * ZIndexScale);
-					z = Mathf.Clamp(z, -4096, 4095);
-					ViewNode.ZIndex = z;
-				}
-			}
+		var scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
+		_id = CustomEntityRenderEngineLocator.Renderer?.AddSprite(texture, _transform2D.Position, _transform2D.Rotation, scale) ?? 0UL;
+		_transform2D.ClearDirty(TransformDirtyFlags.All);
 
-			// Apply pending sprite if provided
-			if (!string.IsNullOrEmpty(PendingSpritePath))
-			{
-				SetSprite(PendingSpritePath);
-				PendingSpritePath = null;
-			}
-		}
+		// Clear pending
+		PendingSpritePath = null;
 	}
 
 	public void OnDetached()
 	{
-		if (ViewNode != null)
+		if (_id != 0UL)
 		{
-			// Note: Scene management might need to be handled by the system using this component
-			ViewNode.QueueFree();
-			ViewNode = null;
+			CustomEntityRenderEngineLocator.Renderer?.RemoveSprite(_id);
+			_id = 0UL;
 		}
 		_transform2D = null;
-	}
-
-	private void EnsureSpriteNode()
-	{
-		if (Sprite != null) return;
-		if (ViewNode is Sprite2D rootSprite)
-		{
-			Sprite = rootSprite;
-			return;
-		}
-		// Try find any Sprite2D under the view
-		Sprite = FindFirstSprite(ViewNode);
-		if (Sprite != null) return;
-		// Create one if still missing
-		var sprite = new Sprite2D { Name = "Sprite" };
-		ViewNode.AddChild(sprite);
-		Sprite = sprite;
-	}
-
-	private Sprite2D FindFirstSprite(Node node)
-	{
-		if (node == null) return null;
-		foreach (Node child in node.GetChildren())
-		{
-			if (child is Sprite2D s) return s;
-		}
-		return null;
 	}
 }
