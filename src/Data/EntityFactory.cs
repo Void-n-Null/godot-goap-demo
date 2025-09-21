@@ -16,7 +16,10 @@ public static class EntityFactory
     public static Entity Create(EntityBlueprint blueprint, params Action<Entity>[] additionalMutators)
     {
         ArgumentNullException.ThrowIfNull(blueprint);
-        var entity = new FactoryEntity();
+        var entity = new FactoryEntity
+        {
+            Name = blueprint.Name
+        };
 
         // Add tags
         foreach (var tag in blueprint.GetAllTags())

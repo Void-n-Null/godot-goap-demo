@@ -30,7 +30,7 @@ public static class Primordial
         addComponents: () => [ new TransformComponent2D() ]
     );
 
-        // Visual layer (no components by itself; specialized types add visuals)
+    // Visual layer (no components by itself; specialized types add visuals)
     public static readonly EntityBlueprint EmbodiedEntity = Entity2D.Derive(
         name: "VisualEntity2D",
         addComponents: () => [

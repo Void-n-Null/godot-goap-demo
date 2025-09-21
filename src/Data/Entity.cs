@@ -17,6 +17,11 @@ public abstract class Entity : IUpdatableEntity
     public Guid Id { get; } = Guid.NewGuid();
 
     /// <summary>
+    /// Human-readable name of the entity, usually from its blueprint.
+    /// </summary>
+    public string Name { get; internal set; }
+
+    /// <summary>
     /// Entity tags for categorization and filtering.
     /// </summary>
     public HashSet<Tag> Tags { get; } = [];
