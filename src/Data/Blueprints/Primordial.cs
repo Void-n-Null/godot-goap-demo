@@ -19,7 +19,7 @@ public static class Primordial
         {
             { typeof(TransformComponent2D), DuplicatePolicy.Prohibit },
             { typeof(VisualComponent), DuplicatePolicy.Prohibit },
-            { typeof(MovementComponent), DuplicatePolicy.Prohibit },
+            { typeof(MotorComponent), DuplicatePolicy.Prohibit },
             { typeof(HealthComponent), DuplicatePolicy.Prohibit },
         }
     };

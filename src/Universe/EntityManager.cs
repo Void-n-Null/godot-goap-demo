@@ -21,7 +21,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// <summary>
 	/// Maximum entities to prevent memory issues.
 	/// </summary>
-	private const int MAX_ENTITIES = 10000;
+	private const int MAX_ENTITIES = 15000;
 
 	/// <summary>
 	/// All entities (with or without views) for bulk updates.
@@ -121,16 +121,4 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 
 	public int EntityCount => _entities.Count;
 	// No ViewCount here.
-
-	/// <summary>
-	/// Spawns an entity from a blueprint, optionally sets position, registers and initializes it.
-	/// </summary>
-	public Entity Spawn(EntityBlueprint blueprint)
-	{
-		var entity = EntityFactory.Create(blueprint);
-
-		// Register (views attach themselves inside VisualComponent)
-		RegisterEntity(entity);
-		return entity;
-	}
 }

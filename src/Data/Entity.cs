@@ -9,7 +9,7 @@ namespace Game.Data;
 /// Base entity with core ECS functionality.
 /// Supports component-based architecture with inheritable components.
 /// </summary>
-public abstract class Entity : IUpdatableEntity
+public class Entity : IUpdatableEntity
 {
     /// <summary>
     /// Unique entity ID for component lookup and debugging.
@@ -241,6 +241,40 @@ public abstract class Entity : IUpdatableEntity
         }
         return false;
     }
+
+    /// <summary>
+    /// Gets a component by a runtime type. Supports polymorphic matches.
+    /// </summary>
+    public IComponent GetComponent(Type componentType)
+    {
+        if (_components.TryGetValue(componentType, out var component))
+        {
+            return component;
+        }
+        foreach (var c in _components.Values)
+        {
+            if (componentType.IsAssignableFrom(c.GetType())) return c;
+        }
+        return null;
+    }
+
+    public void OnStart()
+    {
+        foreach (var component in _components.Values)
+        {
+            component.OnStart();
+        }
+    }
+
+    /// <summary>
+    /// Checks for a component by runtime type.
+    /// </summary>
+    public bool HasComponent(Type componentType) => GetComponent(componentType) != null;
+
+    /// <summary>
+    /// Enumerates all components attached to this entity.
+    /// </summary>
+    public IEnumerable<IComponent> GetAllComponents() => _components.Values;
 
 
     /// <summary>

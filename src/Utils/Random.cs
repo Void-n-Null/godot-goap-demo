@@ -47,4 +47,11 @@ public static class Random
     {
         return array[Instance.Next(0, array.Length)];
     }
+
+    public static Vector2 InsideCircle(Vector2 center, float radius)
+    {
+        var angle = NextFloat(0, 2 * Mathf.Pi);
+        var distance = NextFloat(0, radius);
+        return center + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * distance;
+    }
 }

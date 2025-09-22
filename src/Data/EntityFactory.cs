@@ -1,7 +1,8 @@
 using Godot;
 using System;
 using Game.Data.Components;
-
+using System.Collections.Generic;
+#nullable enable
 namespace Game.Data;
 
 /// <summary>
@@ -11,12 +12,25 @@ namespace Game.Data;
 /// </summary>
 public static class EntityFactory
 {
-    private sealed class FactoryEntity : Entity { }
+    public sealed class EntityCreateOptions
+    {
+        public CreationErrorMode MutatorErrorType { get; init; } = CreationErrorMode.Warning;
+        public CreationErrorMode RequiredComponentErrorType { get; init; } = CreationErrorMode.Strict;
+        public Action<string>? LogWarning { get; init; } = GD.PushWarning;
+    }
 
-    public static Entity Create(EntityBlueprint blueprint, params Action<Entity>[] additionalMutators)
+    public enum CreationErrorMode{
+        Strict,
+        Warning,
+        Ignore
+    }
+
+    public static Entity Create(EntityBlueprint blueprint, Action<Entity>[]? additionalMutators = null, EntityCreateOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(blueprint);
-        var entity = new FactoryEntity
+        options ??= new EntityCreateOptions();
+        
+        var entity = new Entity
         {
             Name = blueprint.Name
         };
@@ -26,8 +40,8 @@ public static class EntityFactory
             entity.AddTag(tag);
 
         // Components (respect duplicate policy)
-        var seenTypes = new System.Collections.Generic.HashSet<Type>();
-        var warnedTypes = new System.Collections.Generic.HashSet<Type>();
+        var seenTypes = new HashSet<Type>();
+        var warnedTypes = new HashSet<Type>();
         foreach (var comp in blueprint.CreateAllComponents())
         {
             var t = comp.GetType();
@@ -38,18 +52,11 @@ public static class EntityFactory
                 {
                     case DuplicatePolicy.Prohibit:
                         if (!warnedTypes.Contains(t))
-                        {
-                            GD.PushWarning($"EntityFactory: Duplicate component {t.Name} in blueprint '{blueprint.Name}' prohibited; skipping.");
+                        { 
+                            options.LogWarning?.Invoke($"EntityFactory: Duplicate component {t.Name} in blueprint '{blueprint.Name}' prohibited; skipping.");
                             warnedTypes.Add(t);
                         }
                         continue;
-                    case DuplicatePolicy.AllowMultiple:
-                        if (!warnedTypes.Contains(t))
-                        {
-                            GD.PushWarning($"EntityFactory: Duplicate component {t.Name} allowed by policy but storage supports only one per type; replacing previous instance.");
-                            warnedTypes.Add(t);
-                        }
-                        break; // replace previous instance (type-keyed storage)
                     case DuplicatePolicy.Replace:
                     default:
                         break;
@@ -60,8 +67,25 @@ public static class EntityFactory
             seenTypes.Add(t);
         }
 
+        var allMutators = new List<Action<Entity>>(blueprint.GetAllMutators());
+        if (additionalMutators != null && additionalMutators.Length > 0)
+            allMutators.AddRange(additionalMutators);
+        
+
         // Run blueprint mutators (root -> leaf) prior to post-attach
-        foreach (var mutate in blueprint.GetAllMutators())
+        entity.ApplyMutators(allMutators, options);
+
+        // Validate required component dependencies before initialization
+        ValidateRequiredComponents(entity, blueprint, options);
+
+        // Initialize the entity, which will allow components to reference each other and complete their attachment to the entity
+        entity.Initialize();
+        return entity;
+    }
+
+    private static void ApplyMutators(this Entity entity, IReadOnlyList<Action<Entity>> mutators, EntityCreateOptions options)
+    {
+        foreach (var mutate in mutators)
         {
             try
             {
@@ -69,29 +93,101 @@ public static class EntityFactory
             }
             catch (Exception ex)
             {
-                GD.PushWarning($"EntityFactory: Mutator threw in blueprint '{blueprint.Name}': {ex.Message}");
+                switch (options.MutatorErrorType)
+                {
+                    case CreationErrorMode.Strict:
+                        throw;
+                    case CreationErrorMode.Warning:
+                        options.LogWarning?.Invoke($"EntityFactory: Mutator threw: {ex.Message}");
+                        break;
+                    case CreationErrorMode.Ignore:
+                        break;
+                }
             }
         }
+    }
 
-        // Run caller-provided additional mutators (override-friendly)
-        if (additionalMutators != null)
+        /// <summary>
+    /// Returns the chain of blueprints from root base to this one (inclusive).
+    /// </summary>
+    private static IEnumerable<EntityBlueprint> EnumerateRootToLeaf(this EntityBlueprint blueprint)
+    {
+        var stack = new Stack<EntityBlueprint>();
+        for (var bp = blueprint; bp != null; bp = bp.Base)
+            stack.Push(bp);
+        while (stack.Count > 0) yield return stack.Pop();
+    }
+
+    private static IEnumerable<Tag> GetAllTags(this EntityBlueprint blueprint)
+    {
+        // Union while preserving order of appearance across the chain
+        var seen = new HashSet<Tag>();
+        foreach (var bp in blueprint.EnumerateRootToLeaf())
         {
-            foreach (var mutate in additionalMutators)
+            foreach (var tag in bp.Tags)
             {
-                try
+                if (seen.Add(tag)) yield return tag;
+            }
+        }
+    }
+
+    private static IEnumerable<IComponent> CreateAllComponents(this EntityBlueprint blueprint)
+    {
+        foreach (var bp in blueprint.EnumerateRootToLeaf())
+        {
+            var comps = bp.ComponentsFactory?.Invoke();
+            if (comps == null) continue;
+            foreach (var c in comps) yield return c;
+        }
+    }
+    private static IEnumerable<Action<Entity>> GetAllMutators(this EntityBlueprint blueprint)
+    {
+        foreach (var bp in blueprint.EnumerateRootToLeaf())
+        {
+            if (bp.Mutators == null) continue;
+            foreach (var m in bp.Mutators) yield return m;
+        }
+    }
+
+    private static DuplicatePolicy GetDuplicatePolicy(this EntityBlueprint blueprint, Type componentType)
+    {
+        DuplicatePolicy? policy = null;
+        foreach (var bp in blueprint.EnumerateRootToLeaf())
+        {
+            if (bp.DuplicatePolicies != null && bp.DuplicatePolicies.TryGetValue(componentType, out var p))
+            {
+                policy = p;
+            }
+        }
+        return policy ?? DuplicatePolicy.Replace;
+    }
+
+    private static void ValidateRequiredComponents(Entity entity, EntityBlueprint blueprint, EntityCreateOptions options)
+    {
+        foreach (var component in entity.GetAllComponents())
+        {
+            var required = component.GetRequiredComponents();
+            if (required == null) continue;
+            foreach (var dep in required)
+            {
+                var type = dep.ComponentType;
+                if (type == null) continue;
+                if (!entity.HasComponent(type))
                 {
-                    mutate?.Invoke(entity);
-                }
-                catch (Exception ex)
-                {
-                    GD.PushWarning($"EntityFactory: Additional mutator threw: {ex.Message}");
+                    var message = $"EntityFactory: Component {component.GetType().Name} requires {type.Name} on blueprint '{blueprint.Name}'";
+                    switch (options.RequiredComponentErrorType)
+                    {
+                        case CreationErrorMode.Strict:
+                            throw new InvalidOperationException(message);
+                        case CreationErrorMode.Warning:
+                            options.LogWarning?.Invoke(message);
+                            break;
+                        case CreationErrorMode.Ignore:
+                            break;
+                    }
                 }
             }
         }
-
-        // Finalize attachment (post-attach + active registration)
-        entity.Initialize();
-        return entity;
     }
 }
 

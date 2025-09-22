@@ -1,4 +1,6 @@
 using Game.Data;
+using System;
+using System.Collections.Generic;
 
 namespace Game.Data.Components;
 
@@ -35,10 +37,18 @@ public interface IComponent
     Entity Entity { get; set; }
 
     /// <summary>
+    /// Declares required component types that must be present on the same entity.
+    /// Default is none.
+    /// </summary>
+    public virtual IEnumerable<ComponentDependency> GetRequiredComponents() => [];
+
+    /// <summary>
     /// Phase 1: Basic setup, component properties only.
     /// Safe to access component's own data and basic entity info.
     /// </summary>
     virtual void OnPreAttached() { }
+
+    virtual void OnStart() { }
 
     /// <summary>
     /// Phase 2: All components attached, safe to reference other components.
@@ -51,6 +61,27 @@ public interface IComponent
     /// Clean up references and event handlers here.
     /// </summary>
     virtual void OnDetached() { }
+
+
+}
+
+/// <summary>
+/// Strongly-typed declaration of a component dependency.
+/// Guarantees at construction that the required type implements IComponent.
+/// </summary>
+public readonly struct ComponentDependency
+{
+    public Type ComponentType { get; }
+
+    public ComponentDependency(Type componentType)
+    {
+        ArgumentNullException.ThrowIfNull(componentType);
+        if (!typeof(IComponent).IsAssignableFrom(componentType))
+            throw new ArgumentException($"ComponentDependency must be an IComponent type. Got: {componentType}");
+        ComponentType = componentType;
+    }
+
+    public static ComponentDependency Of<T>() where T : IComponent => new ComponentDependency(typeof(T));
 }
 
 /// <summary>

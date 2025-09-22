@@ -34,51 +34,6 @@ public sealed class EntityBlueprint
         Base = @base;
     }
 
-    /// <summary>
-    /// Returns the chain of blueprints from root base to this one (inclusive).
-    /// </summary>
-    public IEnumerable<EntityBlueprint> EnumerateRootToLeaf()
-    {
-        var stack = new Stack<EntityBlueprint>();
-        for (var bp = this; bp != null; bp = bp.Base)
-        {
-            stack.Push(bp);
-        }
-        while (stack.Count > 0) yield return stack.Pop();
-    }
-
-    public IEnumerable<Tag> GetAllTags()
-    {
-        // Union while preserving order of appearance across the chain
-        var seen = new HashSet<Tag>();
-        foreach (var bp in EnumerateRootToLeaf())
-        {
-            foreach (var tag in bp.Tags)
-            {
-                if (seen.Add(tag)) yield return tag;
-            }
-        }
-    }
-
-    public IEnumerable<IComponent> CreateAllComponents()
-    {
-        foreach (var bp in EnumerateRootToLeaf())
-        {
-            var comps = bp.ComponentsFactory?.Invoke();
-            if (comps == null) continue;
-            foreach (var c in comps) yield return c;
-        }
-    }
-
-    public string ResolveScenePath()
-    {
-        string path = null;
-        foreach (var bp in EnumerateRootToLeaf())
-        {
-            if (!string.IsNullOrEmpty(bp.ScenePath)) path = bp.ScenePath;
-        }
-        return path;
-    }
 
     /// <summary>
     /// Creates a derived blueprint by layering additions/overrides on top of this blueprint.
@@ -108,15 +63,6 @@ public sealed class EntityBlueprint
         };
     }
 
-    public IEnumerable<Action<Entity>> GetAllMutators()
-    {
-        foreach (var bp in EnumerateRootToLeaf())
-        {
-            if (bp.Mutators == null) continue;
-            foreach (var m in bp.Mutators) yield return m;
-        }
-    }
-
     public static Action<Entity> Mutate<T>(Action<T> mutate) where T : class, IComponent
     {
         if (mutate == null) throw new ArgumentNullException(nameof(mutate));
@@ -139,25 +85,14 @@ public sealed class EntityBlueprint
         };
     }
 
-    public DuplicatePolicy GetDuplicatePolicy(Type componentType)
-    {
-        DuplicatePolicy? policy = null;
-        foreach (var bp in EnumerateRootToLeaf())
-        {
-            if (bp.DuplicatePolicies != null && bp.DuplicatePolicies.TryGetValue(componentType, out var p))
-            {
-                policy = p;
-            }
-        }
-        return policy ?? DuplicatePolicy.Replace;
-    }
+
 }
 
 public enum DuplicatePolicy
 {
     Replace,
     Prohibit,
-    AllowMultiple
+
 }
 
 

@@ -62,14 +62,16 @@ public partial class GameManager : SingletonNode<GameManager>
 
 
 		// Schedule spawn: girls after 60 ticks
-		for (int i = 0; i < 8000; i++)
-			SpawnEntity.Now(NPC.Girl, Utils.Random.NextVector2(-5000, 5000));
-		
-			
+		// for (int i = 0; i < 100; i++)
+		// 	SpawnEntity.Now(NPC.Follower, Utils.Random.NextVector2(-5000, 5000));
+		// for (int i = 0; i < 10; i++)
+		// 	SpawnEntity.Now(NPC.Wanderer, Utils.Random.NextVector2(-5000, 5000));
+		for (int i = 0; i < 2000; i++)
+			SpawnEntity.Now(NPC.Wanderer);
 	
-		// Schedule a few beds to test furniture blueprints after 120 ticks
-		for (int i = 0; i < 400; i++)
-			SpawnEntity.AfterTickDelay(Furniture.Bed, Utils.Random.NextVector2(-1000, 1000), 60);
+		// // Schedule a few beds to test furniture blueprints after 120 ticks
+		// for (int i = 0; i < 400; i++)
+		// 	SpawnEntity.AfterTickDelay(Furniture.Bed, Utils.Random.NextVector2(-1000, 1000), 60);
 		
 	}
 

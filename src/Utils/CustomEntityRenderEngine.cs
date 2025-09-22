@@ -10,6 +10,31 @@ namespace Game.Utils;
 /// </summary>
 public partial class CustomEntityRenderEngine : Node2D
 {
+    private struct DebugArrow
+    {
+        public Vector2 From;
+        public Vector2 To;
+        public Color Color;
+        public float Thickness;
+    }
+
+    private struct DebugLine
+    {
+        public Vector2 From;
+        public Vector2 To;
+        public Color Color;
+        public float Thickness;
+    }
+
+    private struct DebugCircle
+    {
+        public Vector2 Center;
+        public float Radius;
+        public Color Color;
+        public float Thickness;
+        public int Segments;
+    }
+
     private readonly struct SpriteKey : IEquatable<SpriteKey>
     {
         public readonly ulong Id;
@@ -33,6 +58,9 @@ public partial class CustomEntityRenderEngine : Node2D
     private readonly Dictionary<SpriteKey, Item> _lookup = new();
     private ulong _nextId = 1;
     private bool _orderDirty = true;
+    private readonly List<DebugArrow> _debugArrows = new();
+    private readonly List<DebugLine> _debugLines = new();
+    private readonly List<DebugCircle> _debugCircles = new();
 
     [Export] public bool AlwaysRedraw = true; // set false if you want event-driven redraws
 
@@ -54,6 +82,28 @@ public partial class CustomEntityRenderEngine : Node2D
     {
         if (AlwaysRedraw)
             QueueRedraw();
+    }
+
+    public void QueueDebugArrow(Vector2 from, Vector2 to, Color color, float thickness = 2f)
+    {
+        _debugArrows.Add(new DebugArrow { From = from, To = to, Color = color, Thickness = thickness });
+    }
+
+    public void QueueDebugVector(Vector2 origin, Vector2 vector, Color color, float thickness = 2f)
+    {
+        QueueDebugArrow(origin, origin + vector, color, thickness);
+    }
+
+    public void QueueDebugLine(Vector2 from, Vector2 to, Color color, float thickness = 2f)
+    {
+        _debugLines.Add(new DebugLine { From = from, To = to, Color = color, Thickness = thickness });
+    }
+
+    public void QueueDebugCircle(Vector2 center, float radius, Color color, float thickness = 2f, int segments = 24)
+    {
+        if (segments < 4) segments = 4;
+        if (radius < 0f) radius = 0f;
+        _debugCircles.Add(new DebugCircle { Center = center, Radius = radius, Color = color, Thickness = thickness, Segments = segments });
     }
 
     public ulong AddSprite(Texture2D texture, Vector2 position, float rotation = 0f, Vector2? scale = null, Color? modulate = null)
@@ -109,6 +159,47 @@ public partial class CustomEntityRenderEngine : Node2D
 
     public override void _Draw()
     {
+        // Draw queued debug arrows in world space first
+        for (int i = 0; i < _debugArrows.Count; i++)
+        {
+            var a = _debugArrows[i];
+            // Line
+            DrawLine(a.From, a.To, a.Color, a.Thickness);
+
+            // Arrowhead
+            var dir = (a.To - a.From);
+            var len = dir.Length();
+            if (len > 0.0001f)
+            {
+                var nd = dir / len;
+                float headSize = Mathf.Min(12f, len * 0.25f);
+                var right = new Vector2(-nd.Y, nd.X);
+                var tip = a.To;
+                var basePoint = a.To - nd * headSize;
+                var leftWing = basePoint + right * (headSize * 0.4f);
+                var rightWing = basePoint - right * (headSize * 0.4f);
+                DrawLine(tip, leftWing, a.Color, a.Thickness);
+                DrawLine(tip, rightWing, a.Color, a.Thickness);
+            }
+        }
+        // Lines
+        for (int i = 0; i < _debugLines.Count; i++)
+        {
+            var l = _debugLines[i];
+            DrawLine(l.From, l.To, l.Color, l.Thickness);
+        }
+
+        // Circles (as arcs)
+        for (int i = 0; i < _debugCircles.Count; i++)
+        {
+            var c = _debugCircles[i];
+            DrawArc(c.Center, c.Radius, 0f, Mathf.Tau, c.Segments, c.Color, c.Thickness);
+        }
+
+        _debugArrows.Clear();
+        _debugLines.Clear();
+        _debugCircles.Clear();
+
         if (_orderDirty)
         {
             _items.Sort((a, b) => a.Position.Y.CompareTo(b.Position.Y));

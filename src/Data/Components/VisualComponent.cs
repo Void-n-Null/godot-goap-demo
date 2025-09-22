@@ -2,6 +2,8 @@ using Godot;
 using Game.Data;
 using Game.Data.Components;
 using Game.Utils;
+using System;
+using System.Collections.Generic;
 
 namespace Game.Data.Components;
 
@@ -75,6 +77,11 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 
 		// Clear pending
 		PendingSpritePath = null;
+	}
+
+	public IEnumerable<ComponentDependency> GetRequiredComponents()
+	{
+		yield return ComponentDependency.Of<TransformComponent2D>();
 	}
 
 	public void OnDetached()
