@@ -23,6 +23,8 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// </summary>
 	private const int MAX_ENTITIES = 15000;
 
+	public bool IsFull => _entities.Count >= MAX_ENTITIES;
+
 	/// <summary>
 	/// All entities (with or without views) for bulk updates.
 	/// Fast array iteration, no dictionary overhead.

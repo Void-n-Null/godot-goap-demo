@@ -47,8 +47,7 @@ public class WanderBehavior(float radius = 100f) : IActiveComponent
 
     public void OnTargetReached(){
         _motor.Target = null;
-        var seconds = Random.NextFloat(1.0f, 2.0f);
-        GD.Print("WanderBehavior: Relaxing for ", seconds, " seconds");
+        var seconds = Random.NextFloat(1.0f, 3.0f);
         TaskScheduler.Instance.ScheduleSeconds(StartNewWander, seconds);
     }
 

@@ -2,6 +2,7 @@ using Godot;
 using System;
 using Game.Data.Components;
 using System.Collections.Generic;
+using Game.Universe;
 #nullable enable
 namespace Game.Data;
 
@@ -27,6 +28,11 @@ public static class EntityFactory
 
     public static Entity Create(EntityBlueprint blueprint, Action<Entity>[]? additionalMutators = null, EntityCreateOptions? options = null)
     {
+        if (EntityManager.Instance.IsFull)
+        {
+            throw new InvalidOperationException("EntityFactory: Maximum number of entities reached");
+        }
+
         ArgumentNullException.ThrowIfNull(blueprint);
         options ??= new EntityCreateOptions();
         

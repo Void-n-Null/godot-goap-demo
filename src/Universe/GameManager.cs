@@ -42,6 +42,11 @@ public partial class GameManager : SingletonNode<GameManager>
 		Frame -= callback;
 	}
 
+	public void OnTick(double delta){
+		for (int i = 0; i < 200; i++)
+			SpawnEntity.Now(NPC.Wanderer);
+	}
+
 	public override void _Ready()
 	{
 		Utils.Random.Initialize();
@@ -66,8 +71,8 @@ public partial class GameManager : SingletonNode<GameManager>
 		// 	SpawnEntity.Now(NPC.Follower, Utils.Random.NextVector2(-5000, 5000));
 		// for (int i = 0; i < 10; i++)
 		// 	SpawnEntity.Now(NPC.Wanderer, Utils.Random.NextVector2(-5000, 5000));
-		for (int i = 0; i < 2000; i++)
-			SpawnEntity.Now(NPC.Wanderer);
+		// for (int i = 0; i < 3000; i++)
+		// 	SpawnEntity.Now(NPC.Wanderer);
 	
 		// // Schedule a few beds to test furniture blueprints after 120 ticks
 		// for (int i = 0; i < 400; i++)
@@ -101,6 +106,7 @@ public partial class GameManager : SingletonNode<GameManager>
 			{
 				_accumulatedTime -= TickInterval;
 				Tick?.Invoke(TickInterval);
+				OnTick(TickInterval);
 				ticksThisFrame++;
 			}
 		}
