@@ -16,14 +16,19 @@ public partial class EntityDebugTooltip : SingletonNode<EntityDebugTooltip>
     [Export] public float UpdatesPerSecond = 4.0f;
     [Export] public int MarginX = 8;
     [Export] public int MarginY = 8;
-    [Export] public float ProximityThreshold = 35.0f;
+    [Export] public float ProximityThreshold = 100f;
+    [Export] public float EntityCacheRefreshSeconds = 1.0f;
 
     private Label _label;
     private CanvasLayer _layer;
     private PanelContainer _panel;
     private VBoxContainer _content;
-    private float _accumulator;
+    private float _contentAccumulator;
     private float _thresholdSq => ProximityThreshold * ProximityThreshold;
+    private readonly List<Data.Entity> _cachedEntities = new(256);
+    private float _entityCacheAccumulator;
+    private Data.Entity _currentEntity;
+    private string _currentText = string.Empty;
 
     public override void _Ready()
     {
@@ -51,6 +56,9 @@ public partial class EntityDebugTooltip : SingletonNode<EntityDebugTooltip>
         _content.AddChild(_label);
 
         SetProcess(true);
+
+        // Prime the cache so the first draw has data
+        RefreshEntityCache();
     }
 
     public override void _Process(double delta)
@@ -62,52 +70,72 @@ public partial class EntityDebugTooltip : SingletonNode<EntityDebugTooltip>
             return;
         }
 
-        var interval = 1.0f / Mathf.Max(1.0f, UpdatesPerSecond);
-        _accumulator += (float)delta;
-        if (_accumulator < interval)
-            return;
-
-        _accumulator = 0.0f;
+        // Periodically refresh the cached entity list
+        _entityCacheAccumulator += (float)delta;
+        if (_entityCacheAccumulator >= Mathf.Max(0.1f, EntityCacheRefreshSeconds))
+        {
+            _entityCacheAccumulator = 0f;
+            RefreshEntityCache();
+        }
 
         // Require a cached world mouse position
         if (ViewContext.CachedMouseGlobalPosition is not Vector2 mouseWorld)
         {
             if (_panel.Visible)
                 _panel.Visible = false;
+            _currentEntity = null;
+            _currentText = string.Empty;
             return;
         }
 
-        var entity = FindClosestEntity(mouseWorld);
-        if (entity == null)
+        // Throttle expensive content refresh (entity lookup + reflection-based text build)
+        var contentInterval = 1.0f / Mathf.Max(1.0f, UpdatesPerSecond);
+        _contentAccumulator += (float)delta;
+        bool shouldRefreshContent = _contentAccumulator >= contentInterval;
+        if (shouldRefreshContent)
         {
-            if (_panel.Visible)
-                _panel.Visible = false;
-            return;
+            _contentAccumulator = 0.0f;
+
+            var entity = FindClosestEntity(mouseWorld);
+            if (entity == null)
+            {
+                if (_panel.Visible)
+                    _panel.Visible = false;
+                _currentEntity = null;
+                _currentText = string.Empty;
+            }
+            else
+            {
+                // Rebuild text each refresh to capture changing values
+                _currentEntity = entity;
+                _currentText = BuildEntityText(entity);
+                _label.Text = _currentText;
+                if (!_panel.Visible)
+                    _panel.Visible = true;
+            }
         }
 
-        // Build text for the selected entity
-        _label.Text = BuildEntityText(entity);
-
-        // Position near cursor (screen space)
-        var mouseScreen = GetViewport().GetMousePosition();
-        _panel.OffsetLeft = (int)(mouseScreen.X + MarginX);
-        _panel.OffsetTop = (int)(mouseScreen.Y + MarginY);
-        if (!_panel.Visible)
-            _panel.Visible = true;
+        // Always update tooltip position every frame for smooth follow
+        if (_panel.Visible)
+        {
+            var mouseScreen = GetViewport().GetMousePosition();
+            _panel.OffsetLeft = (int)(mouseScreen.X + MarginX);
+            _panel.OffsetTop = (int)(mouseScreen.Y + MarginY);
+        }
     }
 
     private Data.Entity FindClosestEntity(Vector2 mouseWorld)
     {
-        var manager = Universe.EntityManager.Instance;
-        if (manager == null) return null;
+        if (_cachedEntities.Count == 0)
+            return null;
 
         Data.Entity best = null;
         float bestDistSq = float.MaxValue;
 
-        var list = manager.GetEntities();
-        for (int i = 0; i < list.Count; i++)
+        for (int i = 0; i < _cachedEntities.Count; i++)
         {
-            if (list[i] is not Data.Entity e) continue;
+            var e = _cachedEntities[i];
+            if (e == null) continue;
             var t = e.Transform;
             if (t == null) continue;
             float d2 = (t.Position - mouseWorld).LengthSquared();
@@ -119,6 +147,22 @@ public partial class EntityDebugTooltip : SingletonNode<EntityDebugTooltip>
         }
 
         return best;
+    }
+
+    private void RefreshEntityCache()
+    {
+        _cachedEntities.Clear();
+        var manager = Universe.EntityManager.Instance;
+        if (manager == null) return;
+
+        var list = manager.GetEntities();
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (list[i] is Data.Entity e)
+            {
+                _cachedEntities.Add(e);
+            }
+        }
     }
 
     private string BuildEntityText(Data.Entity entity)
