@@ -52,6 +52,7 @@ public partial class CustomEntityRenderEngine : Node2D
         public float Rotation;
         public Vector2 Scale = Vector2.One;
         public Color Modulate = Colors.White;
+        public float ZBias = 0f; // positive draws slightly above same-Y items
     }
 
     private readonly List<Item> _items = new();
@@ -106,7 +107,7 @@ public partial class CustomEntityRenderEngine : Node2D
         _debugCircles.Add(new DebugCircle { Center = center, Radius = radius, Color = color, Thickness = thickness, Segments = segments });
     }
 
-    public ulong AddSprite(Texture2D texture, Vector2 position, float rotation = 0f, Vector2? scale = null, Color? modulate = null)
+    public ulong AddSprite(Texture2D texture, Vector2 position, float rotation = 0f, Vector2? scale = null, Color? modulate = null, float zBias = 0f)
     {
         if (texture == null) throw new ArgumentNullException(nameof(texture));
         var id = _nextId++;
@@ -117,7 +118,8 @@ public partial class CustomEntityRenderEngine : Node2D
             Position = position,
             Rotation = rotation,
             Scale = scale ?? Vector2.One,
-            Modulate = modulate ?? Colors.White
+            Modulate = modulate ?? Colors.White,
+            ZBias = zBias
         };
         _items.Add(item);
         _lookup[new SpriteKey(id)] = item;
@@ -140,6 +142,24 @@ public partial class CustomEntityRenderEngine : Node2D
         if (texture == null) return;
         if (_lookup.TryGetValue(new SpriteKey(id), out var item))
             item.Texture = texture;
+    }
+
+    public void UpdateSpriteModulate(ulong id, Color color)
+    {
+        if (_lookup.TryGetValue(new SpriteKey(id), out var item))
+            item.Modulate = color;
+    }
+
+    public void UpdateSpriteZBias(ulong id, float zBias)
+    {
+        if (_lookup.TryGetValue(new SpriteKey(id), out var item))
+        {
+            if (!Mathf.IsEqualApprox(item.ZBias, zBias))
+            {
+                item.ZBias = zBias;
+                _orderDirty = true;
+            }
+        }
     }
 
     public void RemoveSprite(ulong id)
@@ -202,7 +222,12 @@ public partial class CustomEntityRenderEngine : Node2D
 
         if (_orderDirty)
         {
-            _items.Sort((a, b) => a.Position.Y.CompareTo(b.Position.Y));
+            _items.Sort((a, b) =>
+            {
+                var ay = a.Position.Y + a.ZBias;
+                var by = b.Position.Y + b.ZBias;
+                return ay.CompareTo(by);
+            });
             _orderDirty = false;
         }
 

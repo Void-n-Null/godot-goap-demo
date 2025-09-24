@@ -31,6 +31,8 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// </summary>
 	private readonly List<IUpdatableEntity> _entities = new(MAX_ENTITIES);
 
+	public IReadOnlyList<IUpdatableEntity> AllEntities => _entities.AsReadOnly();
+
 	// Intentionally no view mappings. Views are owned by VisualComponent.
 
 	public override void _Ready()

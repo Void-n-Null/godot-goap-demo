@@ -43,8 +43,7 @@ public partial class GameManager : SingletonNode<GameManager>
 	}
 
 	public void OnTick(double delta){
-		for (int i = 0; i < 200; i++)
-			SpawnEntity.Now(NPC.Wanderer);
+
 	}
 
 	public override void _Ready()
@@ -57,6 +56,7 @@ public partial class GameManager : SingletonNode<GameManager>
 		{
 			GD.Print("GameManager: DebugMode enabled");
 			AddChild(new StatsOverlay());
+			AddChild(new EntityDebugTooltip());
 		}
 
 		// Ensure the TaskScheduler exists in the scene
@@ -72,8 +72,14 @@ public partial class GameManager : SingletonNode<GameManager>
 		// for (int i = 0; i < 10; i++)
 		// 	SpawnEntity.Now(NPC.Wanderer, Utils.Random.NextVector2(-5000, 5000));
 		// for (int i = 0; i < 3000; i++)
-		// 	SpawnEntity.Now(NPC.Wanderer);
-	
+		//SpawnEntity.Now(NPC.Wanderer)
+		// for (int i = 0; i < 10; i++)
+		// 	SpawnEntity.Now(NPC.Intelligent, Utils.Random.NextVector2(-500, 500));
+		for (int i = 0; i < 20; i++) 
+			SpawnEntity.Now(Food.RawBeef, Utils.Random.NextVector2(-2000, 2000));
+		for (int i = 0; i < 20; i++)
+			SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-2000, 2000));
+		
 		// // Schedule a few beds to test furniture blueprints after 120 ticks
 		// for (int i = 0; i < 400; i++)
 		// 	SpawnEntity.AfterTickDelay(Furniture.Bed, Utils.Random.NextVector2(-1000, 1000), 60);

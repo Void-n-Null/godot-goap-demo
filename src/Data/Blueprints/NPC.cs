@@ -17,6 +17,7 @@ public static class NPC
         ],
         addComponents: () => [
             new NPCMotorComponent(maxSpeed: 900f * Random.NextFloat(0.4f, 1.7f), friction: 0.04f, maxAcceleration: 1500f, targetReachedRadius: 32f), //Enables movement
+            new NPCData()
         ],
         addMutators: [
             EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = Random.NextItem([
@@ -41,6 +42,13 @@ public static class NPC
         name: "Wanderer",
         addComponents: () => [
             new WanderBehavior(radius: 1000f)
+        ]
+    );
+
+    public static readonly EntityBlueprint Intelligent = NPCBase.Derive(    
+        name: "Intelligent AI NPC",
+        addComponents: () => [
+            new UtilityAIBehavior()
         ]
     );
 }

@@ -21,6 +21,8 @@ public class Entity : IUpdatableEntity
     /// </summary>
     public string Name { get; internal set; }
 
+    public EntityBlueprint Blueprint { get; internal set; }
+
     /// <summary>
     /// Entity tags for categorization and filtering.
     /// </summary>

@@ -38,7 +38,8 @@ public static class EntityFactory
         
         var entity = new Entity
         {
-            Name = blueprint.Name
+            Name = blueprint.Name,
+            Blueprint = blueprint
         };
 
         // Add tags

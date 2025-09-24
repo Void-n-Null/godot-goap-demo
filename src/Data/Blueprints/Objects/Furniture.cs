@@ -8,7 +8,10 @@ public static class Furniture
 {
     public static readonly EntityBlueprint BaseFurniture = Primordial.EmbodiedEntity.Derive(
         name: "BaseFurniture",
-        addTags: [ Tags.Furniture, Tags.Flammable ]
+        addTags: [ Tags.Furniture, Tags.Flammable ],
+        addComponents: () => [
+            new FlammableComponent(startOnFire: Random.NextBool())
+        ]
     );
 
     public static readonly EntityBlueprint Bed = BaseFurniture.Derive(
