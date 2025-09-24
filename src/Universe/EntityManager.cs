@@ -33,6 +33,8 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 
 	public IReadOnlyList<IUpdatableEntity> AllEntities => _entities.AsReadOnly();
 
+	private int _currentSliceIndex;
+
 	// Intentionally no view mappings. Views are owned by VisualComponent.
 
 	public override void _Ready()
@@ -74,10 +76,31 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// </summary>
 	private void OnTick(double delta)
 	{
-		for (int i = 0; i < _entities.Count; i++)
+		int totalSlices = GameManager.Instance?.CurrentTickSliceCount ?? 1;
+		int sliceIndex = GameManager.Instance?.CurrentTickSliceIndex ?? 0;
+		if (totalSlices <= 1 || _entities.Count == 0)
+		{
+			for (int i = 0; i < _entities.Count; i++)
+			{
+				_entities[i].Update(delta);
+			}
+			_currentSliceIndex = 0;
+			return;
+		}
+
+		int sliceSize = Mathf.CeilToInt((float)_entities.Count / totalSlices);
+		int start = sliceIndex * sliceSize;
+		if (start >= _entities.Count)
+		{
+			start = 0;
+			sliceIndex = 0;
+		}
+		int end = Mathf.Min(start + sliceSize, _entities.Count);
+		for (int i = start; i < end; i++)
 		{
 			_entities[i].Update(delta);
 		}
+		_currentSliceIndex = (sliceIndex + 1) % totalSlices;
 	}
 
 	/// <summary>
