@@ -86,6 +86,17 @@ public class Entity : IUpdatableEntity
     protected readonly List<IActiveComponent> _activeComponents = [];
 
     /// <summary>
+    /// True when this entity currently has at least one active component.
+    /// </summary>
+    public bool HasActiveComponents => _activeComponents.Count > 0;
+
+    /// <summary>
+    /// Fired when the active component presence toggles between zero and non-zero.
+    /// Bool argument is the new state of <see cref="HasActiveComponents"/>.
+    /// </summary>
+    public event Action<Entity, bool> ActiveComponentsStateChanged;
+
+    /// <summary>
     /// Tracks whether this entity has completed initial attachment.
     /// Controls whether newly added components should run OnPostAttached immediately.
     /// </summary>
@@ -116,6 +127,7 @@ public class Entity : IUpdatableEntity
     /// </summary>
     public void AddComponent<T>(T component) where T : IComponent
     {
+        bool wasActive = HasActiveComponents;
         var key = component.GetType();
         if (_components.TryGetValue(key, out var existing))
         {
@@ -151,6 +163,14 @@ public class Entity : IUpdatableEntity
             {
                 _activeComponents.Add(active);
             }
+            if (!wasActive && HasActiveComponents)
+            {
+                ActiveComponentsStateChanged?.Invoke(this, true);
+            }
+            else if (wasActive && !HasActiveComponents)
+            {
+                ActiveComponentsStateChanged?.Invoke(this, false);
+            }
         }
     }
 
@@ -159,6 +179,7 @@ public class Entity : IUpdatableEntity
     /// </summary>
     public void AddComponent(IComponent component)
     {
+        bool wasActive = HasActiveComponents;
         var key = component.GetType();
         if (_components.TryGetValue(key, out var existing))
         {
@@ -191,6 +212,14 @@ public class Entity : IUpdatableEntity
             {
                 _activeComponents.Add(active);
             }
+            if (!wasActive && HasActiveComponents)
+            {
+                ActiveComponentsStateChanged?.Invoke(this, true);
+            }
+            else if (wasActive && !HasActiveComponents)
+            {
+                ActiveComponentsStateChanged?.Invoke(this, false);
+            }
         }
     }
 
@@ -200,6 +229,7 @@ public class Entity : IUpdatableEntity
     /// </summary>
     private void CompleteAttachment()
     {
+        bool wasActive = HasActiveComponents;
         foreach (var component in _components.Values)
         {
             component.OnPostAttached();
@@ -208,6 +238,10 @@ public class Entity : IUpdatableEntity
                 _activeComponents.Add(active);
             }
         }
+        if (!wasActive && HasActiveComponents)
+        {
+            ActiveComponentsStateChanged?.Invoke(this, true);
+        }
     }
 
     /// <summary>
@@ -215,6 +249,7 @@ public class Entity : IUpdatableEntity
     /// </summary>
     public bool RemoveComponent<T>() where T : IComponent
     {
+        bool wasActive = HasActiveComponents;
         if (_components.TryGetValue(typeof(T), out var component))
         {
             component.OnDetached();
@@ -226,7 +261,12 @@ public class Entity : IUpdatableEntity
             // Invalidate caches for known component types
             if (typeof(T) == typeof(TransformComponent2D)) _transform = null;
             else if (typeof(T) == typeof(VisualComponent)) _visual = null;
-            return _components.Remove(typeof(T));
+            bool removed = _components.Remove(typeof(T));
+            if (wasActive && !HasActiveComponents)
+            {
+                ActiveComponentsStateChanged?.Invoke(this, false);
+            }
+            return removed;
         }
         return false;
     }

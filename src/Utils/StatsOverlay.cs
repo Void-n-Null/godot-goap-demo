@@ -110,6 +110,19 @@ public partial class StatsOverlay : SingletonNode<StatsOverlay>
 
         string text = $"FPS: {fps:0}  |  Mem: {memTotalMB:0.0} MB";
 
+        // Entities
+        try
+        {
+            var em = Game.Universe.EntityManager.Instance;
+            if (em != null)
+            {
+                int total = em.EntityCount;
+                int active = em.ActiveEntityCount;
+                text += $"  |  Entities: {total} ({active} active)";
+            }
+        }
+        catch { /* EntityManager may not be ready in tool mode */ }
+
         if (ShowObjectCount)
         {
             var objects = (double)Performance.GetMonitor(Performance.Monitor.ObjectCount);

@@ -15,7 +15,6 @@ MaxTicksPerFrame = 15
 script = ExtResource("2_0wfyh")
 ViewRoot = NodePath("../Entities")
 DefaultViewScene = ExtResource("3_sugp2")
-DebugDrawSpatialIndex = true
 
 [node name="Entities" type="Node2D" parent="."]
 

@@ -10,7 +10,7 @@ namespace Game.Data.Components;
 /// <summary>
 /// Visual representation component.
 /// </summary>
-public class VisualComponent(string ScenePath = null) : IActiveComponent
+public class VisualComponent(string ScenePath = null) : IComponent
 {
 	// Immediate-mode version using CustomEntityRenderEngine; legacy node fields kept for compatibility
 	public Node2D ViewNode { get; private set; }
@@ -53,14 +53,12 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 			CustomEntityRenderEngineLocator.Renderer?.UpdateSpriteTexture(_id, texture);
 	}
 
-	public void Update(double delta)
+	private void PushTransform()
 	{
 		if (_id == 0UL || _transform2D == null) return;
-		var dirty = _transform2D.DirtyMask;
-		if (dirty == TransformDirtyFlags.None) return;
 		var scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
 		CustomEntityRenderEngineLocator.Renderer?.UpdateSprite(_id, _transform2D.Position, _transform2D.Rotation, scale);
-		_transform2D.ClearDirty(dirty);
+		_transform2D.ClearDirty(TransformDirtyFlags.All);
 	}
 
 	public void OnPreAttached()
@@ -72,6 +70,11 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 	{
 		_transform2D = Entity.GetComponent<TransformComponent2D>();
 		if (_transform2D == null) return;
+
+		// Subscribe to transform change events for event-driven updates
+		_transform2D.PositionChanged += OnTransformChanged;
+		_transform2D.RotationChanged += OnTransformChanged;
+		_transform2D.ScaleChanged += OnTransformChanged;
 
 		// Choose initial texture
 		Texture2D texture = null;
@@ -99,7 +102,13 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 			CustomEntityRenderEngineLocator.Renderer?.RemoveSprite(_id);
 			_id = 0UL;
 		}
-		_transform2D = null;
+		if (_transform2D != null)
+		{
+			_transform2D.PositionChanged -= OnTransformChanged;
+			_transform2D.RotationChanged -= OnTransformChanged;
+			_transform2D.ScaleChanged -= OnTransformChanged;
+			_transform2D = null;
+		}
 		_overlayDirty = false;
 		_hasOverlay = false;
 	}
@@ -142,5 +151,10 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 		}
 
 		_overlayDirty = false;
+	}
+
+	private void OnTransformChanged(Entity _)
+	{
+		PushTransform();
 	}
 }

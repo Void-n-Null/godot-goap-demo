@@ -98,20 +98,20 @@ public partial class GameManager : SingletonNode<GameManager>
 		}
 
 
-		// Schedule spawn: girls after 60 ticks
-		// for (int i = 0; i < 100; i++)
-		// 	SpawnEntity.Now(NPC.Follower, Utils.Random.NextVector2(-5000, 5000));
+		// for (int i = 0; i < 1000; i++)
+		// 	SpawnEntity.Now(NPC.Wanderer, Utils.Random.NextVector2(-5000, 5000));
 		// for (int i = 0; i < 10; i++)
 		// 	SpawnEntity.Now(NPC.Wanderer, Utils.Random.NextVector2(-5000, 5000));
 		// for (int i = 0; i < 3000; i++)
 		//SpawnEntity.Now(NPC.Wanderer)
-		for (int i = 0; i < 20; i++)
+		for (int i = 0; i < 120; i++)
 			SpawnEntity.Now(NPC.Intelligent, Utils.Random.NextVector2(-500, 500));
-		for (int i = 0; i < 0; i++) 
+		for (int i = 0; i < 700; i++) 
 			SpawnEntity.Now(Food.RawBeef, Utils.Random.NextVector2(-5000, 5000));
-		for (int i = 0; i < 600; i++)
+		for (int i = 0; i < 6000; i++)
 			SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-10000, 10000));
-		
+		// for (int i = 0; i < 15000; i++)
+		// 	SpawnEntity.Now(Items.Stick, Utils.Random.NextVector2(-10000, 10000));
 		// // Schedule a few beds to test furniture blueprints after 120 ticks
 		// for (int i = 0; i < 400; i++)
 		// 	SpawnEntity.AfterTickDelay(Furniture.Bed, Utils.Random.NextVector2(-1000, 1000), 60);

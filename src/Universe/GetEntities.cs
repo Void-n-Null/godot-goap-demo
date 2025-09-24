@@ -90,6 +90,16 @@ public static class GetEntities
         return Spatial.QueryCircle(center, radius, predicate, maxResults);
     }
 
+    public static IEnumerable<Entity> InRangeByPredicateWithCounts(Vector2 center, float radius, System.Func<Entity, bool> predicate, int maxResults, out int testedCount)
+    {
+        return Spatial.QueryCircleWithCounts(center, radius, predicate, maxResults, out testedCount);
+    }
+
+    public static Entity NearestByPredicateWithCounts(Vector2 center, float maxRadius, System.Func<Entity, bool> predicate, out int testedCount)
+    {
+        return Spatial.FindNearestWithCounts(center, maxRadius, predicate, out testedCount);
+    }
+
     // ---------------- MultiTry utilities ----------------
     // Scales radius additively: startRadius + (step * i) for i in [0, attempts)
     public static IEnumerable<Entity> MultiTryInRangeByTag(Tag tag, Vector2 center, int attempts, float step, float startRadius = 0f, int maxResults = int.MaxValue)

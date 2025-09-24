@@ -24,6 +24,8 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
     private Vector2 _scale = Scale ?? Vector2.One;
 
     public event Action<Entity> PositionChanged;
+        public event Action<Entity> RotationChanged;
+        public event Action<Entity> ScaleChanged;
 
     public TransformDirtyFlags DirtyMask { get; private set; } = TransformDirtyFlags.All;
 
@@ -50,6 +52,10 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
             if (Mathf.IsEqualApprox(_rotation, value)) return;
             _rotation = value;
             DirtyMask |= TransformDirtyFlags.Rotation;
+                if (Entity != null)
+                {
+                    RotationChanged?.Invoke(Entity);
+                }
         }
     }
 
@@ -61,6 +67,10 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
             if (_scale == value) return;
             _scale = value;
             DirtyMask |= TransformDirtyFlags.Scale;
+                if (Entity != null)
+                {
+                    ScaleChanged?.Invoke(Entity);
+                }
         }
     }
 

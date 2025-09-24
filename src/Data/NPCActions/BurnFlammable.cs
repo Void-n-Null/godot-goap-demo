@@ -84,15 +84,22 @@ public sealed class BurnFlammable : INPCAction
 	private static Entity FindNearestFlammable(Entity seeker)
 	{
 		var origin = seeker.Transform?.Position ?? default;
-		var candidates = GetEntities.MultiTryInRangeByPredicate(
+		int tested;
+		var nearest = GetEntities.NearestByPredicateWithCounts(
 			origin,
-			attempts: 8,
-			step: 100f,
-			predicate: e => e != null && e.Transform != null && e.GetComponent<FlammableComponent>()?.IsBurning == false);
+			maxRadius: 1200f,
+			predicate: e => e != null && e.Transform != null && e.GetComponent<FlammableComponent>()?.IsBurning == false,
+			out tested);
 
-		return candidates
-			?.OrderBy(e => e.Transform.Position.DistanceSquaredTo(origin))
-			.FirstOrDefault();
+		// if (nearest == null)
+		// {
+		// 	Godot.GD.Print($"BurnFlammable: nearest search tested {tested} entities, no flammable found <= 1200.");
+		// }
+		// else
+		// {
+		// 	Godot.GD.Print($"BurnFlammable: nearest search tested {tested} entities, found target at distance {nearest.Transform.Position.DistanceTo(origin):0.0}.");
+		// }
+		return nearest;
 	}
 
 	private void IgniteTarget()

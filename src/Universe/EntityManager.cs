@@ -32,10 +32,12 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// Fast array iteration, no dictionary overhead.
 	/// </summary>
 	private readonly List<IUpdatableEntity> _entities = new(MAX_ENTITIES);
+	private readonly List<IUpdatableEntity> _activeEntities = new(MAX_ENTITIES);
 	private SpatialIndex _spatialIndex;
 	private readonly HashSet<Entity> _spatialDirty = new();
 	private readonly HashSet<Entity> _spatialTracked = new();
 	private bool _isProcessingTick;
+	private readonly Queue<Action> _pendingEntityListMutations = new();
 
 	public SpatialIndex SpatialPartition
 	{
@@ -98,33 +100,57 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		{
 			int totalSlices = GameManager.Instance?.CurrentTickSliceCount ?? 1;
 			int sliceIndex = GameManager.Instance?.CurrentTickSliceIndex ?? 0;
-			if (totalSlices <= 1 || _entities.Count == 0)
+			// Build a local view of active updatables for this tick
+			int activeCount = _activeEntities.Count > 0 ? _activeEntities.Count : _entities.Count;
+
+			if (totalSlices <= 1 || activeCount == 0)
 			{
-				for (int i = 0; i < _entities.Count; i++)
+				if (_activeEntities.Count > 0)
 				{
-					_entities[i].Update(delta);
+					for (int i = 0; i < _activeEntities.Count; i++)
+					{
+						_activeEntities[i].Update(delta);
+					}
+				}
+				else
+				{
+					for (int i = 0; i < _entities.Count; i++)
+					{
+						_entities[i].Update(delta);
+					}
 				}
 				_currentSliceIndex = 0;
 				return;
 			}
 
-			int sliceSize = Mathf.CeilToInt((float)_entities.Count / totalSlices);
+			int sliceSize = Mathf.CeilToInt((float)activeCount / totalSlices);
 			int start = sliceIndex * sliceSize;
-			if (start >= _entities.Count)
+			if (start >= activeCount)
 			{
 				start = 0;
 				sliceIndex = 0;
 			}
-			int end = Mathf.Min(start + sliceSize, _entities.Count);
-			for (int i = start; i < end; i++)
+			int end = Mathf.Min(start + sliceSize, activeCount);
+			if (_activeEntities.Count > 0)
 			{
-				_entities[i].Update(delta);
+				for (int i = start; i < end; i++)
+				{
+					_activeEntities[i].Update(delta);
+				}
+			}
+			else
+			{
+				for (int i = start; i < end; i++)
+				{
+					_entities[i].Update(delta);
+				}
 			}
 			_currentSliceIndex = (sliceIndex + 1) % totalSlices;
 		}
 		finally
 		{
 			FlushSpatialUpdates();
+			FlushPendingEntityListMutations();
 			if (DebugDrawSpatialIndex)
 			{
 				DrawSpatialDebug();
@@ -187,6 +213,12 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 				EnsureSpatialIndex();
 				_spatialIndex.Sync(concrete);
 				HookSpatialTracking(concrete);
+				HookActiveTracking(concrete);
+				// Seed active list if already active
+				if (concrete.HasActiveComponents && !_activeEntities.Contains(concrete))
+				{
+					_activeEntities.Add(concrete);
+				}
 			}
 			return true;
 		}
@@ -212,6 +244,8 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 				_spatialIndex.Untrack(concrete);
 				_spatialDirty.Remove(concrete);
 				UnhookSpatialTracking(concrete);
+				UnhookActiveTracking(concrete);
+				_activeEntities.Remove(concrete);
 			}
 			return true;
 		}
@@ -237,6 +271,24 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 
 	public int EntityCount => _entities.Count;
 	// No ViewCount here.
+
+	public int ActiveEntityCount
+	{
+		get
+		{
+			if (_activeEntities.Count > 0)
+			{
+				return _activeEntities.Count;
+			}
+			// If active list is empty, compute actual active Entities
+			int count = 0;
+			for (int i = 0; i < _entities.Count; i++)
+			{
+				if (_entities[i] is Entity e && e.HasActiveComponents) count++;
+			}
+			return count;
+		}
+	}
 
 	private void MarkSpatialDirty(Entity entity)
 	{
@@ -283,6 +335,50 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 			{
 				_spatialIndex.Sync(concrete);
 			}
+		}
+	}
+
+	private void HookActiveTracking(Entity entity)
+	{
+		entity.ActiveComponentsStateChanged += OnActiveComponentsStateChanged;
+	}
+
+	private void UnhookActiveTracking(Entity entity)
+	{
+		entity.ActiveComponentsStateChanged -= OnActiveComponentsStateChanged;
+	}
+
+	private void OnActiveComponentsStateChanged(Entity entity, bool isActive)
+	{
+		if (_isProcessingTick)
+		{
+			_pendingEntityListMutations.Enqueue(() => ApplyActiveChange(entity, isActive));
+		}
+		else
+		{
+			ApplyActiveChange(entity, isActive);
+		}
+	}
+
+	private void ApplyActiveChange(Entity entity, bool isActive)
+	{
+		if (isActive)
+		{
+			if (!_activeEntities.Contains(entity)) _activeEntities.Add(entity);
+		}
+		else
+		{
+			_activeEntities.Remove(entity);
+		}
+	}
+
+	private void FlushPendingEntityListMutations()
+	{
+		while (_pendingEntityListMutations.Count > 0)
+		{
+			var action = _pendingEntityListMutations.Dequeue();
+			try { action?.Invoke(); }
+			catch (Exception ex) { GD.PushError($"EntityManager: Active list mutation failed: {ex}"); }
 		}
 	}
 

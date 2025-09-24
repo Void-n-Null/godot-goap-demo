@@ -49,7 +49,6 @@ public class FlammableComponent(
 
     public void SetOnFire()
     {
-        GD.Print($"Setting on fire {Entity.Name}");
         if (IsBurning) return;
         IsBurning = true;
 
