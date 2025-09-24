@@ -39,6 +39,7 @@ public sealed class BurnFlammable : INPCAction
 		}
 
 		_motor.OnTargetReached += IgniteTarget;
+		_flammable.BurningStateChanged += OnFlammableStateChanged;
 		_motor.Target = _target.Transform.Position;
 	}
 
@@ -72,6 +73,8 @@ public sealed class BurnFlammable : INPCAction
 	{
 		if (_motor != null)
 			_motor.OnTargetReached -= IgniteTarget;
+		if (_flammable != null)
+			_flammable.BurningStateChanged -= OnFlammableStateChanged;
 
 		_target = null;
 		_flammable = null;
@@ -80,10 +83,15 @@ public sealed class BurnFlammable : INPCAction
 
 	private static Entity FindNearestFlammable(Entity seeker)
 	{
-		return GetEntities.WithComponent<FlammableComponent>()
-			?.Where(e => e != null && e.Transform != null)
-			.Where(e => e.GetComponent<FlammableComponent>()?.IsBurning == false)
-			.OrderBy(e => e.Transform.Position.DistanceSquaredTo(seeker.Transform.Position))
+		var origin = seeker.Transform?.Position ?? default;
+		var candidates = GetEntities.MultiTryInRangeByPredicate(
+			origin,
+			attempts: 8,
+			step: 100f,
+			predicate: e => e != null && e.Transform != null && e.GetComponent<FlammableComponent>()?.IsBurning == false);
+
+		return candidates
+			?.OrderBy(e => e.Transform.Position.DistanceSquaredTo(origin))
 			.FirstOrDefault();
 	}
 
@@ -104,5 +112,16 @@ public sealed class BurnFlammable : INPCAction
 		IsComplete = true;
 		if (_motor != null)
 			_motor.OnTargetReached -= IgniteTarget;
+		if (_flammable != null)
+			_flammable.BurningStateChanged -= OnFlammableStateChanged;
+	}
+
+	private void OnFlammableStateChanged(FlammableComponent component, bool isBurning)
+	{
+		if (isBurning)
+		{
+			// Someone else ignited our target, complete the action
+			Complete();
+		}
 	}
 }

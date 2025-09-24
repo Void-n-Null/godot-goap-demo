@@ -23,6 +23,8 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
     private float _rotation = Rotation;
     private Vector2 _scale = Scale ?? Vector2.One;
 
+    public event Action<Entity> PositionChanged;
+
     public TransformDirtyFlags DirtyMask { get; private set; } = TransformDirtyFlags.All;
 
     public Vector2 Position
@@ -33,6 +35,10 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
             if (_position == value) return;
             _position = value;
             DirtyMask |= TransformDirtyFlags.Position;
+            if (Entity != null)
+            {
+                PositionChanged?.Invoke(Entity);
+            }
         }
     }
 

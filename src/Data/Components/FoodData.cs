@@ -20,4 +20,11 @@ public class FoodData : IComponent
 
     public int ThirstRestoredOnConsumption { get; set; }
     
+    // Events
+    public event System.Action<FoodData> FoodConsumed;
+    
+    public void MarkAsConsumed()
+    {
+        FoodConsumed?.Invoke(this);
+    }
 }

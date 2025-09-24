@@ -24,6 +24,9 @@ public class FlammableComponent(
     public string FlameTexturePath { get; set; } = flameTexturePath;
     // State
     public bool IsBurning { get; private set; }
+    
+    // Events
+    public event System.Action<FlammableComponent, bool> BurningStateChanged;
 
     // Cached component references
     private TransformComponent2D _transform2D;
@@ -52,6 +55,7 @@ public class FlammableComponent(
 
         TryCreateFlameOverlay();
         ApplyOverlay(true);
+        BurningStateChanged?.Invoke(this, true);
     }
 
     public void Extinguish()
@@ -60,6 +64,7 @@ public class FlammableComponent(
         IsBurning = false;
         RemoveFlameOverlay();
         ApplyOverlay(false);
+        BurningStateChanged?.Invoke(this, false);
     }
 
     public void OnStart(){

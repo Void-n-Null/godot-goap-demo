@@ -21,7 +21,7 @@ public partial class GameManager : SingletonNode<GameManager>
 	[Export] int TickRatePerSecond = 60;
 	[Export] int MaxTicksPerFrame = 4; // max slices processed per frame when catching up
 	[Export] double MaxAccumulatedTimeSeconds = 0.25; // cap backlog to ~15 ticks at 60 Hz
-	[Export] int MaxFramesPerTick = 3; // Preferred number of frames to distribute a tick across when possible
+	[Export] int MaxFramesPerTick = 10; // Preferred number of frames to distribute a tick across when possible
 	[Export(PropertyHint.Range, "0.01,1,0.01")] float FrameTimeSmoothing = 0.1f;
 
 	private event Action<double> Tick;
@@ -105,11 +105,11 @@ public partial class GameManager : SingletonNode<GameManager>
 		// 	SpawnEntity.Now(NPC.Wanderer, Utils.Random.NextVector2(-5000, 5000));
 		// for (int i = 0; i < 3000; i++)
 		//SpawnEntity.Now(NPC.Wanderer)
-		for (int i = 0; i < 200; i++)
+		for (int i = 0; i < 20; i++)
 			SpawnEntity.Now(NPC.Intelligent, Utils.Random.NextVector2(-500, 500));
-		for (int i = 0; i < 1200; i++) 
+		for (int i = 0; i < 0; i++) 
 			SpawnEntity.Now(Food.RawBeef, Utils.Random.NextVector2(-5000, 5000));
-		for (int i = 0; i < 6000; i++)
+		for (int i = 0; i < 600; i++)
 			SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-10000, 10000));
 		
 		// // Schedule a few beds to test furniture blueprints after 120 ticks

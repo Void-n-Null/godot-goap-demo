@@ -16,6 +16,7 @@ public sealed class ConsumeNearestFood : INPCAction
 	private Entity _target;
 	private NPCMotorComponent _motor;
 	private NPCData _npcData;
+	private FoodData _foodData;
 
 	public bool IsComplete { get; set; }
 
@@ -37,7 +38,15 @@ public sealed class ConsumeNearestFood : INPCAction
 			return;
 		}
 
+		_foodData = _target.GetComponent<FoodData>();
+		if (_foodData == null)
+		{
+			IsComplete = true;
+			return;
+		}
+
 		_motor.OnTargetReached += ConsumeTarget;
+		_foodData.FoodConsumed += OnFoodConsumed;
 		_motor.Target = _target.Transform.Position;
 	}
 
@@ -71,34 +80,42 @@ public sealed class ConsumeNearestFood : INPCAction
 	{
 		if (_motor != null)
 			_motor.OnTargetReached -= ConsumeTarget;
+		if (_foodData != null)
+			_foodData.FoodConsumed -= OnFoodConsumed;
 
 		_target = null;
 		_motor = null;
 		_npcData = null;
+		_foodData = null;
 	}
 
 	private Entity FindNearestFood(Entity seeker)
 	{
-		var entities = GetEntities.WithComponent<FoodData>();
-		if (entities == null || !entities.Any())
-			return null;
+		var origin = seeker.Transform?.Position ?? default;
+		var candidates = GetEntities.MultiTryInRangeByComponent<FoodData>(
+			origin,
+			attempts: 8,
+			step: 100f);
 
-		return entities
-			.Where(e => e != null && e.Transform != null)
-			.OrderBy(e => e.Transform.Position.DistanceSquaredTo(seeker.Transform.Position))
+		return candidates
+			?.Where(e => e != null && e.Transform != null)
+			.OrderBy(e => e.Transform.Position.DistanceSquaredTo(origin))
 			.FirstOrDefault();
 	}
 
 	private void ConsumeTarget()
 	{
-		if (_target == null || _npcData == null)
+		if (_target == null || _npcData == null || _foodData == null)
 		{
 			Complete();
 			return;
 		}
 
-		float restoreAmount = _target.GetComponent<FoodData>()?.HungerRestoredOnConsumption ?? 0f;
+		float restoreAmount = _foodData.HungerRestoredOnConsumption;
 		_npcData.Hunger = Math.Max(0f, _npcData.Hunger - restoreAmount);
+
+		// Notify others that this food is being consumed
+		_foodData.MarkAsConsumed();
 
 		EntityManager.Instance.UnregisterEntity(_target);
 		_target.Destroy();
@@ -111,5 +128,13 @@ public sealed class ConsumeNearestFood : INPCAction
 		IsComplete = true;
 		if (_motor != null)
 			_motor.OnTargetReached -= ConsumeTarget;
+		if (_foodData != null)
+			_foodData.FoodConsumed -= OnFoodConsumed;
+	}
+
+	private void OnFoodConsumed(FoodData food)
+	{
+		// Someone else consumed our target food, complete the action
+		Complete();
 	}
 }

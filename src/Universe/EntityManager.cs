@@ -18,6 +18,8 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	public Node ViewRoot { get; set; }
 	[Export]
 	public PackedScene DefaultViewScene { get; set; }
+	[Export]
+	public bool DebugDrawSpatialIndex { get; set; } = false;
 	/// <summary>
 	/// Maximum entities to prevent memory issues.
 	/// </summary>
@@ -30,6 +32,19 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// Fast array iteration, no dictionary overhead.
 	/// </summary>
 	private readonly List<IUpdatableEntity> _entities = new(MAX_ENTITIES);
+	private SpatialIndex _spatialIndex;
+	private readonly HashSet<Entity> _spatialDirty = new();
+	private readonly HashSet<Entity> _spatialTracked = new();
+	private bool _isProcessingTick;
+
+	public SpatialIndex SpatialPartition
+	{
+		get
+		{
+			EnsureSpatialIndex();
+			return _spatialIndex;
+		}
+	}
 
 	public IReadOnlyList<IUpdatableEntity> AllEntities => _entities.AsReadOnly();
 
@@ -42,6 +57,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		GD.Print("EntityManager: Ready");
 		base._Ready();
 
+		EnsureSpatialIndex();
 		// Subscribe to GameManager's efficient tick system
 		GameManager.Instance.SubscribeToTick(OnTick);
 
@@ -76,31 +92,79 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// </summary>
 	private void OnTick(double delta)
 	{
-		int totalSlices = GameManager.Instance?.CurrentTickSliceCount ?? 1;
-		int sliceIndex = GameManager.Instance?.CurrentTickSliceIndex ?? 0;
-		if (totalSlices <= 1 || _entities.Count == 0)
+		EnsureSpatialIndex();
+		_isProcessingTick = true;
+		try
 		{
-			for (int i = 0; i < _entities.Count; i++)
+			int totalSlices = GameManager.Instance?.CurrentTickSliceCount ?? 1;
+			int sliceIndex = GameManager.Instance?.CurrentTickSliceIndex ?? 0;
+			if (totalSlices <= 1 || _entities.Count == 0)
+			{
+				for (int i = 0; i < _entities.Count; i++)
+				{
+					_entities[i].Update(delta);
+				}
+				_currentSliceIndex = 0;
+				return;
+			}
+
+			int sliceSize = Mathf.CeilToInt((float)_entities.Count / totalSlices);
+			int start = sliceIndex * sliceSize;
+			if (start >= _entities.Count)
+			{
+				start = 0;
+				sliceIndex = 0;
+			}
+			int end = Mathf.Min(start + sliceSize, _entities.Count);
+			for (int i = start; i < end; i++)
 			{
 				_entities[i].Update(delta);
 			}
-			_currentSliceIndex = 0;
-			return;
+			_currentSliceIndex = (sliceIndex + 1) % totalSlices;
 		}
+		finally
+		{
+			FlushSpatialUpdates();
+			if (DebugDrawSpatialIndex)
+			{
+				DrawSpatialDebug();
+			}
+			_isProcessingTick = false;
+		}
+	}
 
-		int sliceSize = Mathf.CeilToInt((float)_entities.Count / totalSlices);
-		int start = sliceIndex * sliceSize;
-		if (start >= _entities.Count)
+	private void DrawSpatialDebug()
+	{
+		if (_spatialIndex == null) return;
+		var renderer = Utils.CustomEntityRenderEngineLocator.Renderer;
+		if (renderer == null) return;
+
+		// Draw node loose bounds with subtle color intensity by depth; and tight bounds overlayed
+		_spatialIndex.ForEachNode((bounds, loose, depth, count) =>
 		{
-			start = 0;
-			sliceIndex = 0;
-		}
-		int end = Mathf.Min(start + sliceSize, _entities.Count);
-		for (int i = start; i < end; i++)
+			var looseColor = new Color(0f, 0.75f, 1f, Mathf.Clamp(0.1f + depth * 0.05f, 0.1f, 0.6f));
+			var tightColor = new Color(0f, 1f, 0.3f, Mathf.Clamp(0.15f + depth * 0.05f, 0.15f, 0.8f));
+
+			var l = loose;
+			var t = bounds;
+			// Loose rectangle
+			renderer.QueueDebugLine(l.Position, l.Position + new Vector2(l.Size.X, 0f), looseColor, 7f);
+			renderer.QueueDebugLine(l.Position, l.Position + new Vector2(0f, l.Size.Y), looseColor, 7f);
+			renderer.QueueDebugLine(l.Position + l.Size, l.Position + new Vector2(0f, l.Size.Y), looseColor, 7f);
+			renderer.QueueDebugLine(l.Position + l.Size, l.Position + new Vector2(l.Size.X, 0f), looseColor, 7f);
+
+			// Tight rectangle
+			renderer.QueueDebugLine(t.Position, t.Position + new Vector2(t.Size.X, 0f), tightColor, 14f);
+			renderer.QueueDebugLine(t.Position, t.Position + new Vector2(0f, t.Size.Y), tightColor, 14f);
+			renderer.QueueDebugLine(t.Position + t.Size, t.Position + new Vector2(0f, t.Size.Y), tightColor, 14f);
+			renderer.QueueDebugLine(t.Position + t.Size, t.Position + new Vector2(t.Size.X, 0f), tightColor, 14f);
+		}, includeEmpty: false);
+
+		// Optionally draw a small circle for each tracked item (cap for perf)
+		_spatialIndex.ForEachItem(pos =>
 		{
-			_entities[i].Update(delta);
-		}
-		_currentSliceIndex = (sliceIndex + 1) % totalSlices;
+			renderer.QueueDebugCircle(pos, 6f, new Color(1f, 0.6f, 0f, 0.6f), 2f, 20);
+		}, maxCount: 2000);
 	}
 
 	/// <summary>
@@ -118,6 +182,12 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		if (!_entities.Contains(entity))
 		{
 			_entities.Add(entity);
+			if (entity is Entity concrete)
+			{
+				EnsureSpatialIndex();
+				_spatialIndex.Sync(concrete);
+				HookSpatialTracking(concrete);
+			}
 			return true;
 		}
 
@@ -136,6 +206,13 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	{
 		if (_entities.Remove(entity))
 		{
+			if (entity is Entity concrete)
+			{
+				EnsureSpatialIndex();
+				_spatialIndex.Untrack(concrete);
+				_spatialDirty.Remove(concrete);
+				UnhookSpatialTracking(concrete);
+			}
 			return true;
 		}
 		return false;
@@ -146,6 +223,100 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// </summary>
 	public IReadOnlyList<IUpdatableEntity> GetEntities() => _entities;
 
+	public IReadOnlyList<Entity> QueryByTag(Tag tag, Vector2 position, float radius, int maxResults = int.MaxValue)
+	{
+		EnsureSpatialIndex();
+		return _spatialIndex.QueryCircle(position, radius, e => e.Tags.Contains(tag), maxResults);
+	}
+
+	public IReadOnlyList<Entity> QueryByComponent<T>(Vector2 position, float radius, int maxResults = int.MaxValue) where T : class, IComponent
+	{
+		EnsureSpatialIndex();
+		return _spatialIndex.QueryCircle(position, radius, e => e.GetComponent<T>() != null, maxResults);
+	}
+
 	public int EntityCount => _entities.Count;
 	// No ViewCount here.
+
+	private void MarkSpatialDirty(Entity entity)
+	{
+		if (entity == null)
+		{
+			return;
+		}
+
+		EnsureSpatialIndex();
+		_spatialDirty.Add(entity);
+
+		if (!_isProcessingTick)
+		{
+			FlushSpatialUpdates();
+		}
+	}
+
+	private void FlushSpatialUpdates()
+	{
+		if (_spatialIndex == null || _spatialDirty.Count == 0)
+		{
+			return;
+		}
+
+		foreach (var entity in _spatialDirty)
+		{
+			_spatialIndex.Sync(entity);
+		}
+
+		_spatialDirty.Clear();
+	}
+
+	private void EnsureSpatialIndex()
+	{
+		if (_spatialIndex != null)
+		{
+			return;
+		}
+
+		_spatialIndex = new SpatialIndex();
+		for (int i = 0; i < _entities.Count; i++)
+		{
+			if (_entities[i] is Entity concrete)
+			{
+				_spatialIndex.Sync(concrete);
+			}
+		}
+	}
+
+	private void HookSpatialTracking(Entity entity)
+	{
+		if (entity == null || _spatialTracked.Contains(entity))
+		{
+			return;
+		}
+
+		_spatialTracked.Add(entity);
+		var transform = entity.Transform;
+		if (transform != null)
+		{
+			transform.PositionChanged += OnEntityMoved;
+		}
+	}
+
+	private void UnhookSpatialTracking(Entity entity)
+	{
+		if (entity == null || !_spatialTracked.Remove(entity))
+		{
+			return;
+		}
+
+		var transform = entity.Transform;
+		if (transform != null)
+		{
+			transform.PositionChanged -= OnEntityMoved;
+		}
+	}
+
+	private void OnEntityMoved(Entity entity)
+	{
+		MarkSpatialDirty(entity);
+	}
 }

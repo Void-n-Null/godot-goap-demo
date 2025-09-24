@@ -42,6 +42,7 @@ public static class Random
     {
         return list[Instance.Next(0, list.Count)];
     }
+    
 
     public static T NextItem<T>(T[] array)
     {
