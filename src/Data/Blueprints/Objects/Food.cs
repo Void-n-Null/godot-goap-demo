@@ -1,12 +1,11 @@
-using Game.Data.Blueprints;
 using Game.Data.Components;
-using Game.Utils;
+
 
 namespace Game.Data.Blueprints.Objects;
 
 public static class Food
 {
-    public static readonly EntityBlueprint BaseFood = Primordial.EmbodiedEntity.Derive(
+    public static readonly EntityBlueprint BaseFood = Items.BaseItem.Derive(
         name: "BaseFood",
         addTags: [ Tags.Food ]
     );

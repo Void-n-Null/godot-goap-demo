@@ -33,10 +33,14 @@ public class FlammableComponent(
     private ulong _flameSpriteId;
     private Texture2D _flameTexture;
     private float _time;
+    private VisualComponent _visual;
 
     // Tunables for visuals
     private const float FlameZBias = 0.1f; // small positive bias to render on top of base sprite
     private static readonly Color FlameTint = new Color(1.0f, 0.6f, 0.2f, 0.9f);
+    private static readonly Color OverlayTopColor = new Color(1.0f, 0.45f, 0.05f, 0.85f);
+    private static readonly Color OverlayBottomColor = new Color(1.0f, 0.9f, 0.35f, 0.55f);
+    private static readonly Color OverlayBlendColor = new Color(1.0f, 0.85f, 0.6f, 1.0f);
 
     public Entity Entity { get; set; }
 
@@ -47,6 +51,7 @@ public class FlammableComponent(
         IsBurning = true;
 
         TryCreateFlameOverlay();
+        ApplyOverlay(true);
     }
 
     public void Extinguish()
@@ -54,6 +59,7 @@ public class FlammableComponent(
         if (!IsBurning) return;
         IsBurning = false;
         RemoveFlameOverlay();
+        ApplyOverlay(false);
     }
 
     public void OnStart(){
@@ -98,6 +104,8 @@ public class FlammableComponent(
             var r = 8f + 2f * Mathf.Sin(_time * 15.0f);
             CustomEntityRenderEngineLocator.Renderer.QueueDebugCircle(_transform2D.Position, r, new Color(1f, 0.4f, 0.1f, 0.85f), 2f, 24);
         }
+
+        UpdateOverlayPulse();
     }
 
     public void OnPreAttached() { }
@@ -106,10 +114,14 @@ public class FlammableComponent(
     {
         _transform2D = Entity.GetComponent<TransformComponent2D>();
         _health = Entity.GetComponent<HealthComponent>();
+        _visual = Entity.GetComponent<VisualComponent>();
 
         // If it's already burning when attached, ensure overlay exists
         if (IsBurning)
+        {
             TryCreateFlameOverlay();
+            ApplyOverlay(true);
+        }
     }
 
     public IEnumerable<ComponentDependency> GetRequiredComponents()
@@ -123,6 +135,7 @@ public class FlammableComponent(
         RemoveFlameOverlay();
         _transform2D = null;
         _health = null;
+        _visual = null;
     }
 
     private void TryCreateFlameOverlay()
@@ -158,6 +171,37 @@ public class FlammableComponent(
         }
         _flameSpriteId = 0UL;
         _flameTexture = null;
+    }
+
+    private void ApplyOverlay(bool enable)
+    {
+        if (_visual == null) return;
+
+        if (enable)
+        {
+            var baseIntensity = 0.65f;
+            _visual.SetGradientOverlay(baseIntensity, OverlayTopColor, OverlayBottomColor, OverlayBlendColor, Vector2.Up);
+        }
+        else
+        {
+            _visual.ClearOverlay();
+        }
+    }
+
+    private void UpdateOverlayPulse()
+    {
+        if (_visual == null) return;
+        var pulse = 0.55f + 0.25f * Mathf.Sin(_time * 6.5f);
+        var top = OverlayTopColor;
+        var bottom = OverlayBottomColor;
+        var blend = OverlayBlendColor;
+
+        // Slight flicker on alpha for top/bottom
+        float flicker = 0.1f * Mathf.Sin(_time * 9.0f + 0.75f);
+        top.A = Mathf.Clamp(top.A + flicker, 0f, 1f);
+        bottom.A = Mathf.Clamp(bottom.A + flicker * 0.5f, 0f, 1f);
+
+        _visual.SetGradientOverlay(pulse, top, bottom, blend, Vector2.Up);
     }
 }
 

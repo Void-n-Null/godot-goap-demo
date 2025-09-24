@@ -1,6 +1,10 @@
 using Godot;
 using System;
-
+using System.Collections.Generic;
+using Game.Data;
+using Game.Universe;
+using Game.Utils;
+using Random = Game.Utils.Random;
 
 namespace Game.Data.Components;
 
@@ -16,14 +20,21 @@ public class HealthComponent : IComponent
     public float HealthPercentage => MaxHealth > 0 ? CurrentHealth / MaxHealth : 0f;
 
     public event Action<float> OnHealthChanged;
-    public event Action OnDeath;
+
+    
+
+
+    public List<EntityBlueprint> EntitiesToSpawnOnDeath { get; set; } = [];
+    public Action OnDeathAction { get; set; }
 
     public Entity Entity { get; set; }
 
-    public HealthComponent(float maxHealth = 100f)
+    public HealthComponent(float maxHealth = 100f, List<EntityBlueprint> entitiesToSpawnOnDeath = null, Action onDeathAction = null)
     {
         MaxHealth = maxHealth;
         CurrentHealth = maxHealth;
+        EntitiesToSpawnOnDeath = entitiesToSpawnOnDeath;
+        OnDeathAction = onDeathAction;
     }
 
     public void TakeDamage(float damage)
@@ -35,7 +46,7 @@ public class HealthComponent : IComponent
 
         if (CurrentHealth <= 0)
         {
-            OnDeath?.Invoke();
+            OnDeath();
         }
     }
 
@@ -79,10 +90,22 @@ public class HealthComponent : IComponent
         }
     }
 
+    public void OnDeath()
+    {
+        foreach (var blueprint in EntitiesToSpawnOnDeath)
+        {
+            SpawnEntity.Now(blueprint, Entity.Transform.Position + Random.InsideCircle(Vector2.Zero, 100));
+        }
+        EntityManager.Instance.UnregisterEntity(Entity);
+        Entity.Destroy();
+
+        OnDeathAction?.Invoke();
+    }
+
     public void OnDetached()
     {
         // Clean up event handlers
         OnHealthChanged = null;
-        OnDeath = null;
+        OnDeathAction = null;
     }
 }

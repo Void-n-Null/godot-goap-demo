@@ -27,6 +27,13 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 
 	private TransformComponent2D _transform2D;
 	private ulong _id;
+	private bool _overlayDirty;
+	private bool _hasOverlay;
+	private float _overlayIntensity;
+	private Color _overlayTop = Colors.Transparent;
+	private Color _overlayBottom = Colors.Transparent;
+	private Color _overlayBlend = Colors.White;
+	private Vector2 _overlayDirection = Vector2.Up;
 
 	public Entity Entity { get; set; }
 
@@ -77,6 +84,7 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 
 		// Clear pending
 		PendingSpritePath = null;
+		ApplyOverlay();
 	}
 
 	public IEnumerable<ComponentDependency> GetRequiredComponents()
@@ -92,5 +100,47 @@ public class VisualComponent(string ScenePath = null) : IActiveComponent
 			_id = 0UL;
 		}
 		_transform2D = null;
+		_overlayDirty = false;
+		_hasOverlay = false;
+	}
+
+	public void SetGradientOverlay(float intensity, Color top, Color bottom, Color? blend = null, Vector2? direction = null)
+	{
+		_overlayIntensity = Mathf.Clamp(intensity, 0f, 1f);
+		_overlayTop = top;
+		_overlayBottom = bottom;
+		_overlayBlend = blend ?? Colors.White;
+		_overlayDirection = direction?.Normalized() ?? Vector2.Up;
+		_hasOverlay = _overlayIntensity > 0f;
+		_overlayDirty = true;
+		ApplyOverlay();
+	}
+
+	public void ClearOverlay()
+	{
+		_hasOverlay = false;
+		_overlayDirty = true;
+		ApplyOverlay();
+	}
+
+	private void ApplyOverlay()
+	{
+		if (_id == 0UL || !_overlayDirty)
+			return;
+
+		var renderer = CustomEntityRenderEngineLocator.Renderer;
+		if (renderer == null)
+			return;
+
+		if (_hasOverlay)
+		{
+			renderer.UpdateSpriteOverlayGradient(_id, _overlayIntensity, _overlayTop, _overlayBottom, _overlayBlend, _overlayDirection);
+		}
+		else
+		{
+			renderer.ClearSpriteOverlay(_id);
+		}
+
+		_overlayDirty = false;
 	}
 }

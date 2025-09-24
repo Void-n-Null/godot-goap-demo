@@ -1,26 +1,28 @@
 using Game.Data.Blueprints;
 using Game.Data.Components;
+
 using Game.Utils;
 
 namespace Game.Data.Blueprints.Objects;
 
 public static class Furniture
 {
-    public static readonly EntityBlueprint BaseFurniture = Primordial.EmbodiedEntity.Derive(
-        name: "BaseFurniture",
-        addTags: [ Tags.Furniture, Tags.Flammable ],
-        addComponents: () => [
-            new FlammableComponent(startOnFire: Random.NextBool())
-        ]
-    );
+	public static readonly EntityBlueprint BaseFurniture = Primordial.EmbodiedEntity.Derive(
+		name: "BaseFurniture",
+		addTags: [ Tags.Furniture, Tags.Flammable ],
+		addComponents: () => [
+			new FlammableComponent(startOnFire: false, flameTexturePath: "res://textures/Flame.png"),
+			new HealthComponent(maxHealth: 100, entitiesToSpawnOnDeath: [ Items.Stick, Items.Stick, Items.Stick ])
+		]
+	);
 
-    public static readonly EntityBlueprint Bed = BaseFurniture.Derive(
-        name: "Bed",
-        addTags: [ Tags.CanBeSleptIn ],
-        addMutators: [
-            EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = "res://textures/Bed.png")
-        ]
-    );
+	public static readonly EntityBlueprint Bed = BaseFurniture.Derive(
+		name: "Bed",
+		addTags: [ Tags.CanBeSleptIn ],
+		addMutators: [
+			EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = "res://textures/Bed.png")
+		]
+	);
 
-    // Removed YSorted variant; VisualComponent now renders via CustomEntityRenderEngine
+	// Removed YSorted variant; VisualComponent now renders via CustomEntityRenderEngine
 }

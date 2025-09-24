@@ -73,8 +73,8 @@ public partial class GameManager : SingletonNode<GameManager>
 		// 	SpawnEntity.Now(NPC.Wanderer, Utils.Random.NextVector2(-5000, 5000));
 		// for (int i = 0; i < 3000; i++)
 		//SpawnEntity.Now(NPC.Wanderer)
-		// for (int i = 0; i < 10; i++)
-		// 	SpawnEntity.Now(NPC.Intelligent, Utils.Random.NextVector2(-500, 500));
+		for (int i = 0; i < 10; i++)
+			SpawnEntity.Now(NPC.Intelligent, Utils.Random.NextVector2(-500, 500));
 		for (int i = 0; i < 20; i++) 
 			SpawnEntity.Now(Food.RawBeef, Utils.Random.NextVector2(-2000, 2000));
 		for (int i = 0; i < 20; i++)
