@@ -122,6 +122,32 @@ public class Entity : IUpdatableEntity
     }
 
     /// <summary>
+    /// Attempts to get a component of the specified type.
+    /// Returns true if found, false otherwise. The component is output via the out parameter.
+    /// </summary>
+    public bool TryGetComponent<T>(out T component) where T : class, IComponent
+    {
+        if (_components.TryGetValue(typeof(T), out var foundComponent))
+        {
+            component = (T)foundComponent;
+            return true;
+        }
+
+        // Polymorphic fallback: search for first component that implements T
+        foreach (var c in _components.Values)
+        {
+            if (c is T match)
+            {
+                component = match;
+                return true;
+            }
+        }
+
+        component = null;
+        return false;
+    }
+
+    /// <summary>
     /// Adds or replaces a component using two-phase attachment.
     /// Uses the component's runtime type for storage to avoid interface-type overwrites.
     /// </summary>
