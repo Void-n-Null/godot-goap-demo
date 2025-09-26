@@ -18,6 +18,8 @@ public static class Tags
     public static readonly Tag Item = Tag.From("Item");
     public static readonly Tag Weapon = Tag.From("Weapon");
     public static readonly Tag Food = Tag.From("Food");
+    public static readonly Tag Tree = Tag.From("Tree");
+    public static readonly Tag Wooden = Tag.From("Wooden");
 }
 
 

@@ -21,9 +21,6 @@ public class HealthComponent : IComponent
 
     public event Action<float> OnHealthChanged;
 
-    
-
-
     public List<EntityBlueprint> EntitiesToSpawnOnDeath { get; set; } = [];
     public Action OnDeathAction { get; set; }
 
@@ -56,6 +53,15 @@ public class HealthComponent : IComponent
 
         CurrentHealth = Mathf.Min(MaxHealth, CurrentHealth + amount);
         OnHealthChanged?.Invoke(CurrentHealth);
+    }
+
+    public void Kill()
+    {
+        if (!IsAlive) return;
+
+        CurrentHealth = 0;
+        OnHealthChanged?.Invoke(CurrentHealth);
+        OnDeath();
     }
 
     // No per-frame Update: metadata-only; reacts via events

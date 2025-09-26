@@ -104,12 +104,16 @@ public partial class GameManager : SingletonNode<GameManager>
 		// 	SpawnEntity.Now(NPC.Wanderer, Utils.Random.NextVector2(-5000, 5000));
 		// for (int i = 0; i < 3000; i++)
 		//SpawnEntity.Now(NPC.Wanderer)
-		for (int i = 0; i < 120; i++)
-			SpawnEntity.Now(NPC.Intelligent, Utils.Random.NextVector2(-500, 500));
-		for (int i = 0; i < 700; i++) 
-			SpawnEntity.Now(Food.RawBeef, Utils.Random.NextVector2(-5000, 5000));
-		for (int i = 0; i < 6000; i++)
-			SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-10000, 10000));
+		// for (int i = 0; i < 120; i++)
+		// 	SpawnEntity.Now(NPC.Intelligent, Utils.Random.NextVector2(-500, 500));
+		// for (int i = 0; i < 700; i++) 
+		// 	SpawnEntity.Now(Food.RawBeef, Utils.Random.NextVector2(-5000, 5000));
+		// for (int i = 0; i < 6000; i++)
+		// 	SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-10000, 10000));
+
+		for (int i = 0; i < 10; i++)
+			SpawnEntity.Now(Nature.SimpleTree, Utils.Random.NextVector2(-200, 200));
+		SpawnEntity.Now(NPC.Intelligent, Vector2.Zero);
 		// for (int i = 0; i < 15000; i++)
 		// 	SpawnEntity.Now(Items.Stick, Utils.Random.NextVector2(-10000, 10000));
 		// // Schedule a few beds to test furniture blueprints after 120 ticks

@@ -9,7 +9,7 @@ public static class Furniture
 {
 	public static readonly EntityBlueprint BaseFurniture = Primordial.EmbodiedEntity.Derive(
 		name: "BaseFurniture",
-		addTags: [ Tags.Furniture, Tags.Flammable ],
+		addTags: [ Tags.Furniture, Tags.Flammable, Tags.Wooden ],
 		addComponents: () => [
 			new FlammableComponent(startOnFire: false, flameTexturePath: "res://textures/Flame.png"),
 			new HealthComponent(maxHealth: 100, entitiesToSpawnOnDeath: [ Items.Stick, Items.Stick, Items.Stick ])

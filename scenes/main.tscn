@@ -8,7 +8,7 @@
 [node name="Game" type="Node2D"]
 script = ExtResource("1_0wfyh")
 DebugMode = true
-TickRatePerSecond = 30
+TickRatePerSecond = 11
 MaxTicksPerFrame = 15
 
 [node name="EntityManager" type="Node" parent="." node_paths=PackedStringArray("ViewRoot")]

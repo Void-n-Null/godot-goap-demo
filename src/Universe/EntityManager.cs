@@ -38,6 +38,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	private readonly HashSet<Entity> _spatialTracked = new();
 	private bool _isProcessingTick;
 	private readonly Queue<Action> _pendingEntityListMutations = new();
+	private readonly Dictionary<Guid, Entity> _entityById = new();
 
 	public SpatialIndex SpatialPartition
 	{
@@ -210,6 +211,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 			_entities.Add(entity);
 			if (entity is Entity concrete)
 			{
+				_entityById[concrete.Id] = concrete;
 				EnsureSpatialIndex();
 				_spatialIndex.Sync(concrete);
 				HookSpatialTracking(concrete);
@@ -240,6 +242,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		{
 			if (entity is Entity concrete)
 			{
+				_entityById.Remove(concrete.Id);
 				EnsureSpatialIndex();
 				_spatialIndex.Untrack(concrete);
 				_spatialDirty.Remove(concrete);
@@ -256,6 +259,15 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// Gets all entities (for iteration if needed).
 	/// </summary>
 	public IReadOnlyList<IUpdatableEntity> GetEntities() => _entities;
+
+	/// <summary>
+	/// Gets an entity by its unique ID for efficient lookup.
+	/// </summary>
+	public Entity GetEntityById(Guid id)
+	{
+		_entityById.TryGetValue(id, out var entity);
+		return entity;
+	}
 
 	public IReadOnlyList<Entity> QueryByTag(Tag tag, Vector2 position, float radius, int maxResults = int.MaxValue)
 	{
