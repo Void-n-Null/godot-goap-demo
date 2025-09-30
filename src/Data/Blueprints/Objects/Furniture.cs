@@ -12,7 +12,15 @@ public static class Furniture
 		addTags: [ Tags.Furniture, Tags.Flammable, Tags.Wooden ],
 		addComponents: () => [
 			new FlammableComponent(startOnFire: false, flameTexturePath: "res://textures/Flame.png"),
-			new HealthComponent(maxHealth: 100, entitiesToSpawnOnDeath: [ Items.Stick, Items.Stick, Items.Stick ])
+			new HealthComponent(maxHealth: 100),
+			new LootDropComponent 
+			{ 
+				Drops = 
+				[
+					new LootDrop(Items.Stick, quantity: 3) // Drops 3 sticks when destroyed
+				],
+				ScatterRadius = 40f
+			}
 		]
 	);
 

@@ -1,8 +1,6 @@
 
 using System.Threading;
-
 using Game.Data.Components;
-
 using Godot;
 using System.Linq;
 using Game.Universe;
@@ -17,11 +15,12 @@ public sealed class ChopTargetAction(TargetType target = TargetType.Tree) : IAct
     private bool _failed;
     private float _timer;
 
-    public void Enter(State ctx)
+    public void Enter(RuntimeContext ctx)
     {
         _timer = 0f;
         var agent = ctx.Agent;
         var agentTransform = agent.GetComponent<TransformComponent2D>();
+        const float CHOP_RADIUS = 64f; // Must match proximity radius in BuildCurrentState
 
         // Find nearest live target using all entities to avoid spatial issues
         _targetEntity = EntityManager.Instance.AllEntities.OfType<Entity>()
@@ -38,19 +37,31 @@ public sealed class ChopTargetAction(TargetType target = TargetType.Tree) : IAct
             return;
         }
 
+        // CRITICAL: Verify the target is actually close enough to chop
+        var targetTransform = _targetEntity.GetComponent<TransformComponent2D>();
+        float distance = agentTransform.Position.DistanceTo(targetTransform.Position);
+        
+        if (distance > CHOP_RADIUS)
+        {
+            Fail($"ChopTargetAction: {_target} {_targetEntity.Id} is too far ({distance:F1} > {CHOP_RADIUS}). Agent at {agentTransform.Position}, target at {targetTransform.Position}");
+            _failed = true;
+            return;
+        }
+
         if (!_targetEntity.TryGetComponent<HealthComponent>(out _))
         {
             Fail($"Nearest {_target} {_targetEntity.Id} lacks HealthComponent; cannot chop");
             _failed = true;
             return;
         }
-        GD.Print($"ChopTargetAction Enter for {_target} {_targetEntity.Id}: health found, starting timer");
+        
+        GD.Print($"ChopTargetAction Enter for {_target} {_targetEntity.Id}: distance={distance:F1}, starting timer");
 
         _completed = false;
         _failed = false;
     }
 
-    public ActionStatus Update(State ctx, float dt)
+    public ActionStatus Update(RuntimeContext ctx, float dt)
     {
         if (_failed || _targetEntity == null) 
         {
@@ -59,17 +70,20 @@ public sealed class ChopTargetAction(TargetType target = TargetType.Tree) : IAct
         }
 
         _timer += dt;
+        
         if (_timer >= 3f)
         {
+            // Kill the tree - it will spawn sticks automatically via HealthComponent.OnDeath()
             _targetEntity.GetComponent<HealthComponent>().Kill();
+            
             _completed = true;
-            GD.Print($"Chopped down {_target} {_targetEntity.Id} after {_timer:F1}s");
+            GD.Print($"Chopped down {_target} {_targetEntity.Id} after {_timer:F1}s (sticks spawned by tree's death handler)");
         }
 
         return _completed ? ActionStatus.Succeeded : ActionStatus.Running;
     }
 
-    public void Exit(State ctx, ActionExitReason reason)
+    public void Exit(RuntimeContext ctx, ActionExitReason reason)
     {
         if (reason != ActionExitReason.Completed) 
         {
@@ -77,12 +91,29 @@ public sealed class ChopTargetAction(TargetType target = TargetType.Tree) : IAct
         }
     }
 
-    public bool StillValid(State ctx)
+    public bool StillValid(RuntimeContext ctx)
     {
         if (_failed) return false;
-        // Check if any live target exists
-        return EntityManager.Instance.AllEntities.OfType<Entity>().Any(e => e.TryGetComponent<TargetComponent>(out var tc) 
-            && tc.Target == _target && e.TryGetComponent<HealthComponent>(out var health) && health.CurrentHealth > 0);
+        
+        // Verify target still exists and is alive
+        if (_targetEntity == null || !_targetEntity.TryGetComponent<HealthComponent>(out var health) || !health.IsAlive)
+        {
+            return false;
+        }
+        
+        // Verify agent is still close enough to the target
+        const float CHOP_RADIUS = 64f;
+        var agentTransform = ctx.Agent.GetComponent<TransformComponent2D>();
+        var targetTransform = _targetEntity.GetComponent<TransformComponent2D>();
+        float distance = agentTransform.Position.DistanceTo(targetTransform.Position);
+        
+        if (distance > CHOP_RADIUS)
+        {
+            GD.Print($"ChopTargetAction no longer valid: agent moved too far from target ({distance:F1} > {CHOP_RADIUS})");
+            return false;
+        }
+        
+        return true;
     }
 
     public void Fail(string reason)

@@ -19,9 +19,10 @@ public static class SpawnEntity
 	public static Entity Now(EntityBlueprint blueprint, Vector2 position)
 	{
 		var entity = EntityFactory.Create(blueprint);
-		_entityManager.RegisterEntity(entity);
+		// Set position BEFORE registering so spatial index is correct
 		if (entity.Transform != null)
 			entity.Transform.Position = position;
+		_entityManager.RegisterEntity(entity);
 		entity.OnStart();
 		return entity;
 	}

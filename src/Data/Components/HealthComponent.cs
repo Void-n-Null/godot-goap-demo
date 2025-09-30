@@ -20,17 +20,14 @@ public class HealthComponent : IComponent
     public float HealthPercentage => MaxHealth > 0 ? CurrentHealth / MaxHealth : 0f;
 
     public event Action<float> OnHealthChanged;
-
-    public List<EntityBlueprint> EntitiesToSpawnOnDeath { get; set; } = [];
     public Action OnDeathAction { get; set; }
 
     public Entity Entity { get; set; }
 
-    public HealthComponent(float maxHealth = 100f, List<EntityBlueprint> entitiesToSpawnOnDeath = null, Action onDeathAction = null)
+    public HealthComponent(float maxHealth = 100f, Action onDeathAction = null)
     {
         MaxHealth = maxHealth;
         CurrentHealth = maxHealth;
-        EntitiesToSpawnOnDeath = entitiesToSpawnOnDeath;
         OnDeathAction = onDeathAction;
     }
 
@@ -98,14 +95,14 @@ public class HealthComponent : IComponent
 
     public void OnDeath()
     {
-        foreach (var blueprint in EntitiesToSpawnOnDeath)
-        {
-            SpawnEntity.Now(blueprint, Entity.Transform.Position + Random.InsideCircle(Vector2.Zero, 100));
-        }
+        GD.Print($"HealthComponent.OnDeath for {Entity.Name} at {Entity.Transform.Position}");
+        
+        // Trigger death event BEFORE cleanup so components can spawn loot, trigger effects, etc.
+        OnDeathAction?.Invoke();
+        
+        // Clean up entity from world
         EntityManager.Instance.UnregisterEntity(Entity);
         Entity.Destroy();
-
-        OnDeathAction?.Invoke();
     }
 
     public void OnDetached()

@@ -112,7 +112,7 @@ public partial class GameManager : SingletonNode<GameManager>
 		// 	SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-10000, 10000));
 
 		for (int i = 0; i < 10; i++)
-			SpawnEntity.Now(Nature.SimpleTree, Utils.Random.NextVector2(-200, 200));
+			SpawnEntity.Now(Nature.SimpleTree, Utils.Random.NextVector2(-1000, 1000));
 		SpawnEntity.Now(NPC.Intelligent, Vector2.Zero);
 		// for (int i = 0; i < 15000; i++)
 		// 	SpawnEntity.Now(Items.Stick, Utils.Random.NextVector2(-10000, 10000));

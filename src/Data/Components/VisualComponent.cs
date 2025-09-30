@@ -79,10 +79,20 @@ public class VisualComponent(string ScenePath = null) : IComponent
 		// Choose initial texture
 		Texture2D texture = null;
 		if (!string.IsNullOrEmpty(PendingSpritePath))
+		{
 			texture = Resources.GetTexture(PendingSpritePath);
+		}
 
 		var scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
-		_id = CustomEntityRenderEngineLocator.Renderer?.AddSprite(texture, _transform2D.Position, _transform2D.Rotation, scale) ?? 0UL;
+		// Only add sprite if we have a valid texture
+		if (texture != null)
+		{
+			_id = CustomEntityRenderEngineLocator.Renderer?.AddSprite(texture, _transform2D.Position, _transform2D.Rotation, scale) ?? 0UL;
+		}
+		else
+		{
+			_id = 0UL; // No visual representation
+		}
 		_transform2D.ClearDirty(TransformDirtyFlags.All);
 
 		// Clear pending

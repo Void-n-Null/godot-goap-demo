@@ -28,9 +28,20 @@ public sealed class Plan
         Succeeded = IsComplete; // Empty plan is trivially succeeded
     }
 
-    public bool Tick(State ctx, float dt)
+    public bool Tick(RuntimeContext ctx, float dt)
     {
         if (IsComplete) return true;
+
+        // Check runtime guard validity for current action
+        if (_currentAction is IRuntimeGuard guard && !guard.StillValid(ctx))
+        {
+            GD.Print($"Plan step {_currentStepIndex} no longer valid, failing plan");
+            _currentAction.Exit(ctx, ActionExitReason.Failed);
+            _currentAction = null;
+            IsComplete = true;
+            Succeeded = false;
+            return true;
+        }
 
         // Advance to next step if current action done
         if (_currentAction == null || _currentStepIndex < 0)
@@ -44,20 +55,11 @@ public sealed class Plan
             }
 
             var step = _steps[_currentStepIndex];
-            GD.Print($"Plan starting step {_currentStepIndex}: preconds {string.Join(", ", step.Preconditions.Select(kv => $"{kv.Key}={kv.Value}"))}, effects {string.Join(", ", step.Effects.Select(kv => $"{kv.Key}={kv.Value}"))}");
-            if (!step.CanRun(ctx))
-            {
-                GD.PushWarning($"Plan step {_currentStepIndex} CanRun false - preconds unmet: {string.Join(", ", step.Preconditions.Select(kv => $"{kv.Key}={kv.Value}"))}");
-                // Precond not met, fail plan
-                IsComplete = true;
-                Succeeded = false;
-                return true;
-            }
+            GD.Print($"Plan starting step {_currentStepIndex}: {step.Preconditions.Count} preconditions, {step.Effects.Count} effects");
 
-            _currentAction = step.CreateAction(ctx);
+            _currentAction = step.CreateAction();
             _currentAction.Enter(ctx);
             GD.Print($"{_currentStepIndex + 1}. {_currentAction.GetType().Name}");
-            GD.Print($"Step of index {_currentStepIndex} Enter called - action scheduled if applicable");
         }
 
         var status = _currentAction.Update(ctx, dt);  // Pass real dt to action
@@ -70,16 +72,21 @@ public sealed class Plan
 
         var reason = status == ActionStatus.Succeeded ? ActionExitReason.Completed : ActionExitReason.Failed;
         _currentAction.Exit(ctx, reason);
-        if (status == ActionStatus.Failed) _currentAction.Fail("Plan preempted step due to failure"); // Optional, if action needs to clean schedules
+        if (status == ActionStatus.Failed) _currentAction.Fail("Plan preempted step due to failure");
 
         if (status == ActionStatus.Succeeded)
         {
             // Apply effects to tracked facts
             var step = _steps[_currentStepIndex];
-            GD.Print($"Step {_currentStepIndex} succeeded, applying effects: {string.Join(", ", step.Effects.Select(kv => $"{kv.Key}={kv.Value}"))}");
+            GD.Print($"Step {_currentStepIndex} succeeded, applying {step.Effects.Count} effects");
             foreach (var effect in step.Effects)
             {
-                _worldFacts[effect.Key] = effect.Value;
+                object effectValue = effect.Value;
+                if (effect.Value is Func<State, object> func)
+                {
+                    effectValue = func(CurrentState);
+                }
+                _worldFacts[effect.Key] = effectValue;
             }
             CurrentState = new State(_worldFacts); // Update CurrentState
         }
@@ -95,7 +102,7 @@ public sealed class Plan
         return _currentStepIndex >= _steps.Count - 1; // Continue if more steps
     }
 
-    public void Cancel(State ctx)
+    public void Cancel(RuntimeContext ctx)
     {
         if (_currentAction != null)
         {

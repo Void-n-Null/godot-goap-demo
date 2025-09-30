@@ -16,7 +16,9 @@ public static class Items
         name: "Stick",
         addComponents: () => [
             new TargetComponent(TargetType.Stick),
-            new VisualComponent { PendingSpritePath = "res://textures/Stick.png" }
+        ],
+        addMutators: [
+            EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = "res://textures/Stick.png")
         ]
     );
 

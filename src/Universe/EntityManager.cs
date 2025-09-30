@@ -101,6 +101,14 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		{
 			int totalSlices = GameManager.Instance?.CurrentTickSliceCount ?? 1;
 			int sliceIndex = GameManager.Instance?.CurrentTickSliceIndex ?? 0;
+			
+			// CRITICAL: Only update entities on the FIRST slice of a tick
+			// Slicing is for spreading work across frames, NOT for calling entities multiple times
+			if (sliceIndex != 0)
+			{
+				return; // Skip subsequent slices - entities already updated this tick
+			}
+			
 			// Build a local view of active updatables for this tick
 			int activeCount = _activeEntities.Count > 0 ? _activeEntities.Count : _entities.Count;
 

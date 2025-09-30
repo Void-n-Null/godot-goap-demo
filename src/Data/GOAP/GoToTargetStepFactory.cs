@@ -16,36 +16,32 @@ public class GoToTargetStepFactory : IStepFactory
         var steps = new List<Step>();
         foreach (TargetType type in Enum.GetValues<TargetType>())
         {
-            var targetName = type.ToString();
+            // ALWAYS create movement steps - targets might become available during planning
+            var preconds = new Dictionary<string, object> 
+            { 
+                { FactKeys.WorldHas(type), true }  // Target must exist in world
+            };
+            
+            var effects = new Dictionary<string, object> 
+            { 
+                { FactKeys.NearTarget(type), true }  // Agent is now near target
+            };
 
-            // Only create steps for targets that actually exist in the world
-            if (initialState.Facts.TryGetValue($"World{targetName}Count", out var countObj) && countObj is int count && count <= 0)
-            {
-                continue; // Skip if no such targets exist
-            }
-
-            var preconds = new Dictionary<string, object> { { $"Available_{targetName}", true } };
-            var effects = new Dictionary<string, object> { { $"At{targetName}", true } };
-
+            // Cost based on state facts (estimated distance or heuristic)
             var costFactory = (State ctx) =>
             {
-                if (ctx.World?.EntityManager == null)
-                    return double.PositiveInfinity;
-
-                if (!ctx.Agent.TryGetComponent<TransformComponent2D>(out var agentTransform))
-                    return double.PositiveInfinity;
-
-                var nearest = ctx.World.EntityManager.QueryByComponent<TargetComponent>(agentTransform.Position, float.MaxValue)
-                    .FirstOrDefault(e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == type);
-
-                if (nearest == null || !nearest.TryGetComponent<TransformComponent2D>(out var targetTransform))
-                    return double.PositiveInfinity;
-
-                return agentTransform.Position.DistanceTo(targetTransform.Position);
+                // Use distance from state if available, otherwise use fixed cost
+                string distKey = $"Distance_To_{type}";
+                if (ctx.Facts.TryGetValue(distKey, out var distObj) && distObj is double dist)
+                {
+                    return dist;
+                }
+                // Default movement cost estimate
+                return 10.0;
             };
 
             var step = new Step(
-                actionFactory: ctx => new GoToTargetAction(type),
+                actionFactory: () => new GoToTargetAction(type),
                 preconditions: preconds,
                 effects: effects,
                 costFactory: costFactory

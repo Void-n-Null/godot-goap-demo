@@ -16,7 +16,7 @@ public sealed class GoToTargetAction(TargetType type) : IAction, IRuntimeGuard
     private Vector2 _currentTarget;
     private Entity _targetEntity;
 
-    public void Enter(State ctx)
+    public void Enter(RuntimeContext ctx)
     {
         var agent = ctx.Agent;
         if (!agent.TryGetComponent<NPCMotorComponent>(out var motor))
@@ -25,14 +25,24 @@ public sealed class GoToTargetAction(TargetType type) : IAction, IRuntimeGuard
         _motor = motor;
         _arrived = false;
 
-        _targetEntity = ctx.World.EntityManager.QueryByComponent<TargetComponent>(agent.Transform.Position, float.MaxValue)
-            .FirstOrDefault(e => e.GetComponent<TargetComponent>().Target == _type);
+        // Debug: Check what entities exist
+        var allWithTarget = ctx.World.EntityManager.QueryByComponent<TargetComponent>(agent.Transform.Position, float.MaxValue);
+        GD.Print($"GoToTargetAction looking for {_type}. Found {allWithTarget.Count} entities with TargetComponent near agent at {agent.Transform.Position}");
+        foreach (var e in allWithTarget.Take(5))
+        {
+            var tc = e.GetComponent<TargetComponent>();
+            var pos = e.TryGetComponent<TransformComponent2D>(out var t) ? t.Position : Vector2.Zero;
+            GD.Print($"  - Entity {e.Name} has TargetType={tc.Target} at position {pos}");
+        }
+
+        _targetEntity = allWithTarget.FirstOrDefault(e => e.GetComponent<TargetComponent>().Target == _type);
         if (_targetEntity == null)
         {
-            Fail($"No {_type} target available for GoToTargetAction");
+            Fail($"No {_type} target available for GoToTargetAction (checked {allWithTarget.Count} entities)");
             return;
         }
 
+        GD.Print($"GoToTargetAction found target: {_targetEntity.Name} at {_targetEntity.Transform.Position}");
         UpdateTargetPosition();
         _motor.OnTargetReached += OnArrived;
         _motor.Target = _currentTarget;
@@ -52,7 +62,7 @@ public sealed class GoToTargetAction(TargetType type) : IAction, IRuntimeGuard
 
     private void OnArrived() { _arrived = true; }
 
-    public ActionStatus Update(State ctx, float dt)
+    public ActionStatus Update(RuntimeContext ctx, float dt)
     {
         if (_targetEntity == null) 
         {
@@ -63,14 +73,14 @@ public sealed class GoToTargetAction(TargetType type) : IAction, IRuntimeGuard
         return _arrived ? ActionStatus.Succeeded : ActionStatus.Running;
     }
 
-    public void Exit(State ctx, ActionExitReason reason)
+    public void Exit(RuntimeContext ctx, ActionExitReason reason)
     {
         if (_motor == null) return;
         _motor.OnTargetReached -= OnArrived;
         if (reason != ActionExitReason.Completed) _motor.Target = null;
     }
 
-    public bool StillValid(State ctx)
+    public bool StillValid(RuntimeContext ctx)
     {
         var anyAvailable = ctx.World.EntityManager.QueryByComponent<TargetComponent>(Vector2.Zero, float.MaxValue)
             .Any(e => e.GetComponent<TargetComponent>().Target == _type);

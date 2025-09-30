@@ -11,8 +11,16 @@ public static class Nature
         name: "BaseTree",
         addTags: [ Tags.Tree, Tags.Wooden ],
         addComponents: () => [
-            new HealthComponent(maxHealth: 200, entitiesToSpawnOnDeath: [ Items.Stick, Items.Stick, Items.Stick, Items.Stick ]), // More durable, spawns more wood
-            new TargetComponent(TargetType.Tree)
+            new HealthComponent(maxHealth: 200), // More durable
+            new TargetComponent(TargetType.Tree),
+            new LootDropComponent 
+            { 
+                Drops = 
+                [
+                    new LootDrop(Items.Stick, quantity: 4) // Drops 4 sticks
+                ],
+                ScatterRadius = 50f // Tight scatter so agent can pick up all from one position
+            }
         ]
     );
 

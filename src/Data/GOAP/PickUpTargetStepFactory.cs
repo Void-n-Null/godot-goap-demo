@@ -21,41 +21,43 @@ public class PickUpTargetStepFactory : IStepFactory
 
             var targetName = type.ToString();
 
-            // Only create steps for targets that actually exist in the world
-            if (initialState.Facts.TryGetValue($"World{targetName}Count", out var countObj) && countObj is int count && count <= 0)
-            {
-                continue; // Skip if no such targets exist
-            }
-
+            // ALWAYS create pickup steps - resources might become available during planning
+            // (e.g., sticks appear after chopping trees)
             var preconds = new Dictionary<string, object>
             {
-                { $"Available_{targetName}", true },
-                { $"At{targetName}", true }
+                { FactKeys.WorldHas(type), true },  // World must have this resource
+                { FactKeys.NearTarget(type), true }  // Agent must be near it
             };
+            
             var effects = new Dictionary<string, object>
             {
-                { $"{targetName}Count", (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue($"{targetName}Count", out var invObj) && invObj is int inv)
+                // Increment agent's inventory
+                { FactKeys.AgentCount(type), (Func<State, object>)(ctx => {
+                    if (ctx.Facts.TryGetValue(FactKeys.AgentCount(type), out var invObj) && invObj is int inv)
                         return inv + 1;
                     return 1;
                 }) },
-                { $"World{targetName}Count", (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue($"World{targetName}Count", out var worldObj) && worldObj is int world)
+                // Mark agent as having this resource type
+                { FactKeys.AgentHas(type), true },
+                // Decrement world count
+                { FactKeys.WorldCount(type), (Func<State, object>)(ctx => {
+                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(type), out var worldObj) && worldObj is int world)
                         return Math.Max(0, world - 1);
                     return 0;
                 }) },
-                { $"Available_{targetName}", (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue($"World{targetName}Count", out var worldObj) && worldObj is int world)
+                // Update world availability
+                { FactKeys.WorldHas(type), (Func<State, object>)(ctx => {
+                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(type), out var worldObj) && worldObj is int world)
                         return world - 1 > 0;
                     return false;
-                }) },
-                { $"At{targetName}", false }  // No longer at the pickup location after picking up
+                }) }
+                // NOTE: Don't set Near_X to false - multiple items can be at same location
             };
 
-            var costFactory = (State ctx) => 1.0; // Quick pick up
+            var costFactory = (State ctx) => 0.5; // Quick pick up
 
             var step = new Step(
-                actionFactory: ctx => new PickUpTargetAction(type),
+                actionFactory: () => new PickUpTargetAction(type),
                 preconditions: preconds,
                 effects: effects,
                 costFactory: costFactory

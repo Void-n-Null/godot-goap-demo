@@ -91,7 +91,7 @@ public static class GOAPlanner
                     {
                         try
                         {
-                            var action = s.CreateAction(currentState);
+                            var action = s.CreateAction();
                             return action?.GetType().Name ?? "UnknownAction";
                         }
                         catch (Exception e)
@@ -117,19 +117,8 @@ public static class GOAPlanner
                 continue;
             }
 
-            // Regenerate steps if state has changed significantly (e.g., new sticks created)
-            var currentSteps = allSteps;
-            if (HasStateChangedSignificantly(currentState, initialState, dequeuedCount))
-            {
-                currentSteps = GenerateStepsForState(currentState, factories);
-                // Only log regeneration occasionally to reduce noise
-                if (dequeuedCount % 200 == 0)
-                {
-                    GD.Print($"Regenerated {currentSteps.Count} steps at depth {depth}");
-                }
-            }
-
-            var applicableSteps = currentSteps.Where(s => s.CanRun(currentState)).ToList();
+            // Use all steps generated from initial state - no regeneration
+            var applicableSteps = allSteps.Where(s => s.CanRun(currentState)).ToList();
             // Initial state step analysis removed to reduce log noise
 
             foreach (var step in applicableSteps)
@@ -247,27 +236,6 @@ public static class GOAPlanner
             }
         }
         return allSteps;
-    }
-
-    private static bool HasStateChangedSignificantly(State currentState, State referenceState, int dequeuedCount)
-    {
-        // Check if world has changed in ways that would create new steps
-        var significantChanges = new[] {
-            "WorldStickCount", "Available_Stick", "WorldTreeCount", "Available_Tree"
-        };
-
-        foreach (var fact in significantChanges)
-        {
-            var currentValue = currentState.Facts.GetValueOrDefault(fact);
-            var referenceValue = referenceState.Facts.GetValueOrDefault(fact);
-
-            if (!object.Equals(currentValue, referenceValue))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     public static async Task<Plan> PlanAsync(State initialState, State goalState)

@@ -73,13 +73,17 @@ public class UtilityAIBehavior : IActiveComponent
 		// Ensure world data is kept fresh
 		UpdateWorldDataIfNeeded(currentTime);
 
-		// Use cached state unless plan is executing; build fresh when needed
-		var ctx = (_currentPlan == null || _currentPlan.IsComplete) && (_worldStateCache != null && !_worldStateCache.IsExpired(currentTime, STATE_CACHE_DURATION))
-			? new State(_worldStateCache.CachedFacts) { Agent = Entity, World = new World { EntityManager = EntityManager.Instance, GameManager = GameManager.Instance } }
+		// Build current state (pure facts only, no Agent/World)
+		// Use cache when available AND not expired - plan execution doesn't need fresh state every tick
+		var currentState = (_worldStateCache != null && !_worldStateCache.IsExpired(currentTime, STATE_CACHE_DURATION))
+			? new State(_worldStateCache.CachedFacts)
 			: BuildCurrentState();
+		
+		// Create runtime context for execution
+		var runtimeCtx = new RuntimeContext(Entity, new World { EntityManager = EntityManager.Instance, GameManager = GameManager.Instance });
 
-		// Update tracked facts from ctx
-		foreach (var fact in ctx.Facts)
+		// Update tracked facts from current state
+		foreach (var fact in currentState.Facts)
 		{
 			_trackedFacts[fact.Key] = fact.Value;
 		}
@@ -96,11 +100,11 @@ public class UtilityAIBehavior : IActiveComponent
 				if (_currentPlan != null && _currentPlan.Steps.Count > 0)
 				{
 					GD.Print("HERES MY PLAN:");
-					for (int i = 0; i < _currentPlan.Steps.Count; i++)
-					{
-						var step = _currentPlan.Steps[i];
-						var action = step.CreateAction(ctx); // Create action to get type name
-						var stepNum = i + 1;
+				for (int i = 0; i < _currentPlan.Steps.Count; i++)
+				{
+					var step = _currentPlan.Steps[i];
+					var action = step.CreateAction(); // Create action to get type name
+					var stepNum = i + 1;
 						if (stepNum == 1)
 						{
 							GD.Print($"- First I'm Gonna {action.GetType().Name}");
@@ -135,7 +139,7 @@ public class UtilityAIBehavior : IActiveComponent
 			if (_currentPlan?.Succeeded == true)
 			{
 				// Celebrate on success
-				if (ctx.Satisfies(_goalState))
+				if (currentState.Satisfies(_goalState))
 				{
 					GD.Print("Yay! Collected 12 sticks! 🎉 Wood gathering complete!");
 					GD.Print("The forest is now my stick supplier! 🪵🔥");
@@ -156,16 +160,16 @@ public class UtilityAIBehavior : IActiveComponent
 				}
 
 				// Check if world state has meaningfully changed
-				if (HasWorldStateChangedSignificantly(ctx.Facts))
+				if (HasWorldStateChangedSignificantly(currentState.Facts))
 				{
 					_planningInProgress = true;
 					_lastPlanningState = new Dictionary<string, object>();
-					foreach (var fact in ctx.Facts)
+					foreach (var fact in currentState.Facts)
 					{
 						_lastPlanningState[fact.Key] = fact.Value;
 					}
 					_lastPlanningTime = planningTime;
-					_planningTask = GOAPlanner.PlanAsync(ctx, _goalState);
+					_planningTask = GOAPlanner.PlanAsync(currentState, _goalState);
 				}
 			}
 			else if (_HasEnoughSticks())
@@ -174,9 +178,10 @@ public class UtilityAIBehavior : IActiveComponent
 			}
 		}
 
+
 		if (_currentPlan != null && !_currentPlan.IsComplete)
 		{
-			var tickResult = _currentPlan.Tick(ctx, (float)delta);
+			var tickResult = _currentPlan.Tick(runtimeCtx, (float)delta);
 			_trackedFacts = new Dictionary<string, object>(_currentPlan.CurrentState.Facts); // Sync after every tick
 
 			// Clear world state cache when plan makes changes to ensure fresh state building
@@ -195,7 +200,9 @@ public class UtilityAIBehavior : IActiveComponent
 				{
 					GD.Print("Plan failed, replanning...");
 					_currentPlan = null;
-					_worldStateCache = null; // Clear cache on failure too
+					_worldStateCache = null; // Clear cache on failure
+					_lastWorldDataUpdate = -WORLD_DATA_UPDATE_INTERVAL; // Force immediate world data refresh
+					UpdateWorldData(); // Refresh world data NOW to avoid using stale positions
 				}
 			}
 		}
@@ -203,8 +210,7 @@ public class UtilityAIBehavior : IActiveComponent
 
 	public void OnStart()
 	{
-		_goalState = new State(new Dictionary<string, object> { {"StickCount", 12} });
-		_trackedFacts["NeedsToApproach"] = true; // Initial fact
+		_goalState = new State(new Dictionary<string, object> { {FactKeys.AgentCount(TargetType.Stick), 12} });
 		GD.Print("UtilityAIBehavior started - goal: collect 12 sticks!");
 
 		// Seed world data immediately to avoid null world facts on first few frames
@@ -219,7 +225,7 @@ public class UtilityAIBehavior : IActiveComponent
 
 	private bool _HasEnoughSticks()
 	{
-		return _trackedFacts.TryGetValue("StickCount", out var value) && value is int count && count >= 12;
+		return _trackedFacts.TryGetValue(FactKeys.AgentCount(TargetType.Stick), out var value) && value is int count && count >= 12;
 	}
 
 	private bool HasWorldStateChangedSignificantly(IReadOnlyDictionary<string, object> currentFacts)
@@ -231,8 +237,13 @@ public class UtilityAIBehavior : IActiveComponent
 
 		// Check key facts that would affect planning decisions
 		var keyFacts = new[] {
-			"StickCount", "TreeCount", "TreeAvailable", "AtTree", "AtStick",
-			"WorldStickCount", "Available_Stick", "Available_Tree"
+			FactKeys.AgentCount(TargetType.Stick),
+			FactKeys.WorldCount(TargetType.Tree),
+			FactKeys.WorldHas(TargetType.Tree),
+			FactKeys.NearTarget(TargetType.Tree),
+			FactKeys.NearTarget(TargetType.Stick),
+			FactKeys.WorldCount(TargetType.Stick),
+			FactKeys.WorldHas(TargetType.Stick)
 		};
 
 		foreach (var key in keyFacts)
@@ -253,12 +264,13 @@ public class UtilityAIBehavior : IActiveComponent
 	private State BuildCurrentState()
 	{
 		var facts = new Dictionary<string, object>(_trackedFacts); // Start with tracked
-		// Add current position, etc., if needed for actions
+		
+		// Add agent metadata
 		if (Entity.TryGetComponent<TransformComponent2D>(out var transform))
 		{
-			facts["Position"] = transform.Position;
+			facts[FactKeys.Position] = transform.Position;
 		}
-		facts["AgentId"] = Entity.Id.ToString();
+		facts[FactKeys.AgentId] = Entity.Id.ToString();
 
 		// Use pre-computed world data instead of expensive queries
 		if (_worldData != null)
@@ -267,47 +279,47 @@ public class UtilityAIBehavior : IActiveComponent
 			{
 				foreach (TargetType rt in Enum.GetValues<TargetType>())
 				{
-					var targetName = rt.ToString();
-					facts[$"World{targetName}Count"] = _worldData.EntityCounts.GetValueOrDefault(targetName, 0);
-					facts[$"Available_{targetName}"] = _worldData.EntityCounts.GetValueOrDefault(targetName, 0) > 0;
-					facts[$"{targetName}Count"] = npcData.Resources.GetValueOrDefault(rt, 0);
+					int worldCount = _worldData.EntityCounts.GetValueOrDefault(rt.ToString(), 0);
+					int agentCount = npcData.Resources.GetValueOrDefault(rt, 0);
+					
+					// World facts
+					facts[FactKeys.WorldCount(rt)] = worldCount;
+					facts[FactKeys.WorldHas(rt)] = worldCount > 0;
+					
+					// Agent facts
+					facts[FactKeys.AgentCount(rt)] = agentCount;
+					facts[FactKeys.AgentHas(rt)] = agentCount > 0;
 				}
 			}
-
-			facts["TreeCount"] = _worldData.EntityCounts.GetValueOrDefault("Tree", 0);
-			facts["TreeAvailable"] = _worldData.EntityCounts.GetValueOrDefault("Tree", 0) > 0;
 		}
-		else { /* no-op when world data isn't ready */ }
 
 		// Compute proximity facts using cached positions
 		if (Entity.TryGetComponent<TransformComponent2D>(out var agentTransform) && _worldData != null)
 		{
-			const float atRadius = 64f;
+			const float nearRadius = 64f;
 
-			// Check proximity to trees
-			var treesNearby = _worldData.EntityPositions
-				.Where(kvp => kvp.Key.StartsWith("Tree_"))
-				.Count(kvp => agentTransform.Position.DistanceTo(kvp.Value) <= atRadius);
-			facts["AtTree"] = treesNearby > 0;
-
-			// Check proximity to sticks
-			var sticksNearby = _worldData.EntityPositions
-				.Where(kvp => kvp.Key.StartsWith("Stick_"))
-				.Count(kvp => agentTransform.Position.DistanceTo(kvp.Value) <= atRadius);
-			facts["AtStick"] = sticksNearby > 0;
+			// Check proximity to each target type
+			foreach (TargetType targetType in Enum.GetValues<TargetType>())
+			{
+				var nearbyEntities = _worldData.EntityPositions
+					.Where(kvp => kvp.Key.StartsWith($"{targetType}_"))
+					.Where(kvp => agentTransform.Position.DistanceTo(kvp.Value) <= nearRadius)
+					.ToList();
+				
+				var nearbyCount = nearbyEntities.Count;
+				facts[FactKeys.NearTarget(targetType)] = nearbyCount > 0;
+				
+				// Debug: Log proximity calculation for trees ONLY on state changes (cache will prevent spam)
+				// (This log will rarely appear now that we use cache during plan execution)
+			}
 		}
 
 		// Cache the expensive state building
 		float cacheTime = Time.GetTicksMsec() / 1000.0f;
 		_worldStateCache = new WorldStateCache(facts, cacheTime);
 
+		// State is now pure facts only - no Agent or World references
 		var state = new State(facts);
-		state.Agent = Entity;
-		state.World = new World
-		{
-			EntityManager = EntityManager.Instance,
-			GameManager = GameManager.Instance
-		};
 		return state;
 	}
 
@@ -349,22 +361,28 @@ public class UtilityAIBehavior : IActiveComponent
 			}
 		}
 
-		// Count trees
-		var treeCount = allEntities.Count(e => e.Tags.Contains(Tags.Tree));
+		// Count trees - ONLY ALIVE ones
+		var treeCount = allEntities.Count(e => e.Tags.Contains(Tags.Tree) 
+			&& e.TryGetComponent<HealthComponent>(out var health) 
+			&& health.IsAlive);
 		_worldData.EntityCounts["Tree"] = treeCount;
 		_worldData.AvailabilityFlags["TreeAvailable"] = treeCount > 0;
-		// silence noisy tree logging
 
-		// Cache positions for proximity calculations
+		// Cache positions for proximity calculations - ONLY ALIVE entities
 		for (int i = 0; i < allEntities.Count; i++)
 		{
 			var entity = allEntities[i];
 			if (entity.TryGetComponent<TransformComponent2D>(out var transform))
 			{
+				// Trees: only cache if alive
 				if (entity.Tags.Contains(Tags.Tree))
 				{
-					_worldData.EntityPositions[$"Tree_{i}"] = transform.Position;
+					if (entity.TryGetComponent<HealthComponent>(out var health) && health.IsAlive)
+					{
+						_worldData.EntityPositions[$"Tree_{i}"] = transform.Position;
+					}
 				}
+				// Sticks: always cache (no health component)
 				else if (entity.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Stick)
 				{
 					_worldData.EntityPositions[$"Stick_{i}"] = transform.Position;
