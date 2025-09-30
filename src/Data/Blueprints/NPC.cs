@@ -16,7 +16,7 @@ public static class NPC
             Tags.Human
         ],
         addComponents: () => [
-            new NPCMotorComponent(maxSpeed: 120f * Random.NextFloat(0.4f, 1.7f), friction: 0.04f, maxAcceleration: 1500f, targetReachedRadius: 32f), //Enables movement
+            new NPCMotorComponent(maxSpeed: 240f * Random.NextFloat(0.4f, 1.7f), friction: 0.04f, maxAcceleration: 1500f, targetReachedRadius: 32f), //Enables movement
             new NPCData()
         ],
         addMutators: [
@@ -26,6 +26,7 @@ public static class NPC
                 "res://textures/Girl.png",
                 "res://textures/Male.png"
             ])),
+            EntityBlueprint.Mutate<VisualComponent>((c) => c.VisualOriginOffset = new Vector2(0,-50f))
             // EntityBlueprint.Mutate<NPCMotorComponent>((c) => c.DebugDrawEnabled = true)
         ]
     );

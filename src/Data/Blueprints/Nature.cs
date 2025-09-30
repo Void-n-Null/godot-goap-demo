@@ -2,6 +2,7 @@ using Game.Data.Blueprints;
 using Game.Data.Blueprints.Objects;
 using Game.Data.Components;
 using Game.Utils;
+using Godot;
 
 namespace Game.Data.Blueprints;
 
@@ -27,7 +28,9 @@ public static class Nature
     public static readonly EntityBlueprint SimpleTree = BaseTree.Derive(
         name: "SimpleTree",
         addMutators: [
-            EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = "res://textures/Tree.png") // Replace with actual tree texture path
+            EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = "res://textures/Tree.png"), // Replace with actual tree texture path
+            EntityBlueprint.Mutate<VisualComponent>((c) => c.ScaleMultiplier = Vector2.One * 0.45f),
+            EntityBlueprint.Mutate<VisualComponent>((c) => c.VisualOriginOffset = new Vector2(0,-200f))
         ]
     );
 
