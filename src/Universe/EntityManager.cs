@@ -99,62 +99,33 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		_isProcessingTick = true;
 		try
 		{
-			int totalSlices = GameManager.Instance?.CurrentTickSliceCount ?? 1;
-			int sliceIndex = GameManager.Instance?.CurrentTickSliceIndex ?? 0;
-			
-			// CRITICAL: Only update entities on the FIRST slice of a tick
-			// Slicing is for spreading work across frames, NOT for calling entities multiple times
-			if (sliceIndex != 0)
+		int totalSlices = GameManager.Instance?.CurrentTickSliceCount ?? 1;
+		int sliceIndex = GameManager.Instance?.CurrentTickSliceIndex ?? 0;
+		
+		// CRITICAL: Only update entities on the FIRST slice of a tick
+		// Slicing is for spreading work across frames, NOT for calling entities multiple times
+		if (sliceIndex != 0)
+		{
+			return; // Skip subsequent slices - entities already updated this tick
+		}
+		
+		// On slice 0, update ALL entities (ignore slicing since we're only running once per tick)
+		if (_activeEntities.Count > 0)
+		{
+			for (int i = 0; i < _activeEntities.Count; i++)
 			{
-				return; // Skip subsequent slices - entities already updated this tick
+				_activeEntities[i].Update(delta);
 			}
-			
-			// Build a local view of active updatables for this tick
-			int activeCount = _activeEntities.Count > 0 ? _activeEntities.Count : _entities.Count;
-
-			if (totalSlices <= 1 || activeCount == 0)
+		}
+		else
+		{
+			for (int i = 0; i < _entities.Count; i++)
 			{
-				if (_activeEntities.Count > 0)
-				{
-					for (int i = 0; i < _activeEntities.Count; i++)
-					{
-						_activeEntities[i].Update(delta);
-					}
-				}
-				else
-				{
-					for (int i = 0; i < _entities.Count; i++)
-					{
-						_entities[i].Update(delta);
-					}
-				}
-				_currentSliceIndex = 0;
-				return;
+				_entities[i].Update(delta);
 			}
-
-			int sliceSize = Mathf.CeilToInt((float)activeCount / totalSlices);
-			int start = sliceIndex * sliceSize;
-			if (start >= activeCount)
-			{
-				start = 0;
-				sliceIndex = 0;
-			}
-			int end = Mathf.Min(start + sliceSize, activeCount);
-			if (_activeEntities.Count > 0)
-			{
-				for (int i = start; i < end; i++)
-				{
-					_activeEntities[i].Update(delta);
-				}
-			}
-			else
-			{
-				for (int i = start; i < end; i++)
-				{
-					_entities[i].Update(delta);
-				}
-			}
-			_currentSliceIndex = (sliceIndex + 1) % totalSlices;
+		}
+		
+		_currentSliceIndex = 0;
 		}
 		finally
 		{

@@ -25,24 +25,31 @@ public sealed class GoToTargetAction(TargetType type) : IAction, IRuntimeGuard
         _motor = motor;
         _arrived = false;
 
-        // Debug: Check what entities exist
+        // Find unreserved targets only
         var allWithTarget = ctx.World.EntityManager.QueryByComponent<TargetComponent>(agent.Transform.Position, float.MaxValue);
-        GD.Print($"GoToTargetAction looking for {_type}. Found {allWithTarget.Count} entities with TargetComponent near agent at {agent.Transform.Position}");
-        foreach (var e in allWithTarget.Take(5))
-        {
-            var tc = e.GetComponent<TargetComponent>();
-            var pos = e.TryGetComponent<TransformComponent2D>(out var t) ? t.Position : Vector2.Zero;
-            GD.Print($"  - Entity {e.Name} has TargetType={tc.Target} at position {pos}");
-        }
+        var availableTargets = allWithTarget
+            .Where(e => e.GetComponent<TargetComponent>().Target == _type)
+            .Where(e => ResourceReservationManager.Instance.IsAvailableFor(e, agent))
+            .OrderBy(e => agent.Transform.Position.DistanceTo(e.Transform.Position))
+            .ToList();
 
-        _targetEntity = allWithTarget.FirstOrDefault(e => e.GetComponent<TargetComponent>().Target == _type);
-        if (_targetEntity == null)
+        if (availableTargets.Count == 0)
         {
-            Fail($"No {_type} target available for GoToTargetAction (checked {allWithTarget.Count} entities)");
+            GD.Print($"[{agent.Name}] GoToTargetAction: No unreserved {_type} available (total {_type}s: {allWithTarget.Count(e => e.GetComponent<TargetComponent>().Target == _type)})");
+            Fail($"No unreserved {_type} target available");
             return;
         }
 
-        GD.Print($"GoToTargetAction found target: {_targetEntity.Name} at {_targetEntity.Transform.Position}");
+        _targetEntity = availableTargets.First();
+        
+        // Reserve the target
+        if (!ResourceReservationManager.Instance.TryReserve(_targetEntity, agent))
+        {
+            Fail($"Failed to reserve {_type} target");
+            return;
+        }
+
+        GD.Print($"[{agent.Name}] GoToTargetAction: Going to {_targetEntity.Name} at {_targetEntity.Transform.Position}");
         UpdateTargetPosition();
         _motor.OnTargetReached += OnArrived;
         _motor.Target = _currentTarget;
@@ -77,7 +84,15 @@ public sealed class GoToTargetAction(TargetType type) : IAction, IRuntimeGuard
     {
         if (_motor == null) return;
         _motor.OnTargetReached -= OnArrived;
-        if (reason != ActionExitReason.Completed) _motor.Target = null;
+        if (reason != ActionExitReason.Completed)
+        {
+            _motor.Target = null;
+            // Release reservation if we didn't complete (completed = ChopAction will use it)
+            if (_targetEntity != null)
+            {
+                ResourceReservationManager.Instance.Release(_targetEntity, ctx.Agent);
+            }
+        }
     }
 
     public bool StillValid(RuntimeContext ctx)

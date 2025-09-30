@@ -48,7 +48,11 @@ public static class NPC
     public static readonly EntityBlueprint Intelligent = NPCBase.Derive(    
         name: "Intelligent AI NPC",
         addComponents: () => [
-            new UtilityAIBehavior()
+            new UtilityAIBehaviorV2()
+        ],
+        addMutators: [
+            // Randomize starting hunger (0-80% so some NPCs start hungry)
+            EntityBlueprint.Mutate<NPCData>((npc) => npc.Hunger = Random.NextFloat(0f, 80f))
         ]
     );
 }

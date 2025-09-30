@@ -22,17 +22,18 @@ public sealed class ChopTargetAction(TargetType target = TargetType.Tree) : IAct
         var agentTransform = agent.GetComponent<TransformComponent2D>();
         const float CHOP_RADIUS = 64f; // Must match proximity radius in BuildCurrentState
 
-        // Find nearest live target using all entities to avoid spatial issues
+        // Find nearest live target that we have reserved (should be reserved by GoToTargetAction)
         _targetEntity = EntityManager.Instance.AllEntities.OfType<Entity>()
             .Where(e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == _target 
                 && e.TryGetComponent<HealthComponent>(out var hc) && hc.IsAlive
-                && e.TryGetComponent<TransformComponent2D>(out var tTransform))
+                && e.TryGetComponent<TransformComponent2D>(out var tTransform)
+                && ResourceReservationManager.Instance.IsReservedBy(e, agent)) // Must be reserved by us
             .OrderBy(e => agentTransform.Position.DistanceTo(e.GetComponent<TransformComponent2D>().Position))
             .FirstOrDefault();
 
         if (_targetEntity == null)
         {
-            Fail($"No live {_target} target found for ChopTargetAction");
+            Fail($"No reserved live {_target} target found for ChopTargetAction (target may have been stolen or not reserved)");
             _failed = true;
             return;
         }
@@ -75,6 +76,9 @@ public sealed class ChopTargetAction(TargetType target = TargetType.Tree) : IAct
         {
             // Kill the tree - it will spawn sticks automatically via HealthComponent.OnDeath()
             _targetEntity.GetComponent<HealthComponent>().Kill();
+            
+            // Release the reservation (tree is destroyed)
+            ResourceReservationManager.Instance.Release(_targetEntity, ctx.Agent);
             
             _completed = true;
             GD.Print($"Chopped down {_target} {_targetEntity.Id} after {_timer:F1}s (sticks spawned by tree's death handler)");
