@@ -11,7 +11,8 @@ public static class Nature
         name: "BaseTree",
         addTags: [ Tags.Tree, Tags.Wooden ],
         addComponents: () => [
-            new HealthComponent(maxHealth: 200, entitiesToSpawnOnDeath: [ Items.Stick, Items.Stick, Items.Stick, Items.Stick ]) // More durable, spawns more wood
+            new HealthComponent(maxHealth: 200, entitiesToSpawnOnDeath: [ Items.Stick, Items.Stick, Items.Stick, Items.Stick ]), // More durable, spawns more wood
+            new TargetComponent(TargetType.Tree)
         ]
     );
 

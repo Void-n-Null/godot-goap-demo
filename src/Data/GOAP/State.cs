@@ -24,8 +24,29 @@ public class State
     {
         foreach (var goalFact in goal.Facts)
         {
-            if (!Facts.TryGetValue(goalFact.Key, out var currentValue) ||
-                !currentValue.Equals(goalFact.Value))
+            if (!Facts.TryGetValue(goalFact.Key, out var currentValue))
+            {
+                // For count facts, assume 0 if missing
+                if (goalFact.Key.EndsWith("Count") && goalFact.Value is int)
+                {
+                    currentValue = 0;
+                }
+                else if (goalFact.Value is bool)
+                {
+                    // For boolean facts, assume false if missing
+                    currentValue = false;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            if (goalFact.Key.EndsWith("Count") && goalFact.Value is int goalCount && currentValue is int currentCount)
+            {
+                if (currentCount < goalCount) return false;
+            }
+            else if (!currentValue.Equals(goalFact.Value))
             {
                 return false;
             }
@@ -49,7 +70,4 @@ public class State
         }
         return hash;
     }
-
-    public World World { get; set; }
-    public Game.Data.Entity Agent { get; set; }
 }

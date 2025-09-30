@@ -21,6 +21,10 @@ public class GoToStepFactory : IStepFactory
 		}
 
 		var agentPos = agentTransform.Position;
+		if (initialState.World?.EntityManager == null)
+		{
+			return steps;
+		}
 		var allEntities = initialState.World.EntityManager.AllEntities.OfType<Entity>().ToList();
 		foreach (var targetEntity in allEntities)
 		{
@@ -71,7 +75,29 @@ public class GoToStepFactory : IStepFactory
 			);
 			steps.Add(step);
 		}
-		GD.Print($"GoToStepFactory generated {steps.Count} go-to steps");
 		return steps;
+	}
+
+	private void AddResourceGoToSteps(State initialState, List<Step> steps)
+	{
+		if (!initialState.Facts.TryGetValue("StickAvailable", out var available) || !(bool)available) return;
+
+		var preconds = new Dictionary<string, object> { { "StickAvailable", true } };
+		var effects = new Dictionary<string, object> { { "AtStick", true } };
+		var costFactory = (State ctx) =>
+		{
+			var nearest = ctx.World.EntityManager.QueryByComponent<TargetComponent>(ctx.Agent.Transform.Position, float.MaxValue)
+				.Where(e => e.GetComponent<TargetComponent>().Target == TargetType.Stick).FirstOrDefault();
+			if (nearest == null) return double.PositiveInfinity;
+			return ctx.Agent.GetComponent<TransformComponent2D>().Position.DistanceTo(nearest.GetComponent<TransformComponent2D>().Position);
+		};
+
+		var step = new Step(
+			actionFactory: ctx => new GoToTargetAction(TargetType.Stick), // New action that finds nearest at runtime
+			preconditions: preconds,
+			effects: effects,
+			costFactory: costFactory
+		);
+		steps.Add(step);
 	}
 }

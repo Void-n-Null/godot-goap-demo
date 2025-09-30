@@ -7,15 +7,15 @@ public enum ActionExitReason { Completed, Cancelled, Failed }
 public interface IAction
 {
     // Called once when the step begins. Must be idempotent (safe to call again after a Cancel).
-    void Enter(State ctx);
+    void Enter(RuntimeContext ctx);
 
     // Called every tick until it returns Succeeded or Failed.
     // No side-effects that would make re-Enter unsafe.
-    ActionStatus Update(State ctx, float dt);
+    ActionStatus Update(RuntimeContext ctx, float dt);
 
     // Always called once when the action finishes or gets preempted.
     // Clean up callbacks, reservations, particles, etc.
-    void Exit(State ctx, ActionExitReason reason);
+    void Exit(RuntimeContext ctx, ActionExitReason reason);
 
     // New: Log and report failure with reason
     void Fail(string reason);

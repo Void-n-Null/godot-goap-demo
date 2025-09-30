@@ -7,12 +7,12 @@ namespace Game.Data.GOAP;
 
 public class Step
 {
-    private readonly Func<State, IAction> _actionFactory;
+    private readonly Func<IAction> _actionFactory;
     private readonly Func<State, double> _costFactory;
     public Dictionary<string, object> Preconditions { get; }
     public Dictionary<string, object> Effects { get; }
 
-    public Step(Func<State, IAction> actionFactory, Dictionary<string, object> preconditions, Dictionary<string, object> effects, Func<State, double> costFactory = null)
+    public Step(Func<IAction> actionFactory, Dictionary<string, object> preconditions, Dictionary<string, object> effects, Func<State, double> costFactory = null)
     {
         _actionFactory = actionFactory ?? throw new ArgumentNullException(nameof(actionFactory));
         _costFactory = costFactory ?? (ctx => 1.0);
@@ -20,7 +20,7 @@ public class Step
         Effects = new Dictionary<string, object>(effects ?? new Dictionary<string, object>());
     }
 
-    public IAction CreateAction(State ctx) => _actionFactory(ctx);
+    public IAction CreateAction() => _actionFactory();
 
     public double GetCost(State ctx) => _costFactory(ctx);
 

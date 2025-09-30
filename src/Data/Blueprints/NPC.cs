@@ -16,7 +16,7 @@ public static class NPC
             Tags.Human
         ],
         addComponents: () => [
-            new NPCMotorComponent(maxSpeed: 900f * Random.NextFloat(0.4f, 1.7f), friction: 0.04f, maxAcceleration: 1500f, targetReachedRadius: 32f), //Enables movement
+            new NPCMotorComponent(maxSpeed: 50f * Random.NextFloat(0.4f, 1.7f), friction: 0.04f, maxAcceleration: 1500f, targetReachedRadius: 32f), //Enables movement
             new NPCData()
         ],
         addMutators: [

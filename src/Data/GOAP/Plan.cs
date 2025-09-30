@@ -56,11 +56,15 @@ public sealed class Plan
 
             _currentAction = step.CreateAction(ctx);
             _currentAction.Enter(ctx);
-            GD.Print($"Step {_currentStepIndex} Enter called - action scheduled if applicable");
+            GD.Print($"{_currentStepIndex + 1}. {_currentAction.GetType().Name}");
+            GD.Print($"Step of index {_currentStepIndex} Enter called - action scheduled if applicable");
         }
 
         var status = _currentAction.Update(ctx, dt);  // Pass real dt to action
-        GD.Print($"Step {_currentStepIndex} Update returned {status}");
+        if (status != ActionStatus.Running){
+            GD.Print($"Step {_currentStepIndex} {_currentAction.GetType().Name} Update returned {status}");
+        }
+        
 
         if (status == ActionStatus.Running) return false;
 
