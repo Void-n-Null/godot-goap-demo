@@ -40,15 +40,15 @@ public static class GOAPlanner
         var allSteps = GenerateStepsForState(initialState, factories);
 
         // Use priority queue for A* style planning with heuristic
-        var openSet = new List<(State state, List<Step> path, int depth, float heuristic)>();
+        var openSet = new List<(State state, List<Step> path, double gCost, float fScore)>();
         try
         {
             var initialHeuristic = CalculateHeuristic(initialState, goalState);
-            openSet.Add((initialState.Clone(), new List<Step>(), 0, initialHeuristic));
+            openSet.Add((initialState.Clone(), new List<Step>(), 0.0, initialHeuristic));
         }
-        catch (Exception e)
+        catch
         {
-            GD.PushError($"Error setting up initial planning state: {e.Message}");
+            // Silent fail for initial setup
             return null;
         }
 
@@ -58,15 +58,9 @@ public static class GOAPlanner
 
         while (openSet.Count > 0)
         {
-            // Reduce log noise - only log occasionally
-            if (dequeuedCount % 500 == 0)
-            {
-                GD.Print($"Planning: openSet={openSet.Count}, dequeued={dequeuedCount}");
-            }
-
             // Get state with lowest f-score (g + h)
-            openSet.Sort((a, b) => a.heuristic.CompareTo(b.heuristic));
-            var (currentState, path, depth, _) = openSet[0];
+            openSet.Sort((a, b) => a.fScore.CompareTo(b.fScore));
+            var (currentState, path, gCost, _) = openSet[0];
             openSet.RemoveAt(0);
             dequeuedCount++;
 
@@ -76,9 +70,9 @@ public static class GOAPlanner
                 if (visited.Contains(stateHash)) continue;
                 visited.Add(stateHash);
             }
-            catch (Exception e)
+            catch
             {
-                GD.PushError($"Error creating state hash: {e.Message}");
+                // Silent continue on hash error
                 continue;
             }
 
@@ -86,40 +80,25 @@ public static class GOAPlanner
             {
                 if (currentState.Satisfies(goalState))
                 {
-                    GD.Print($"Found plan with {path.Count} steps (depth {depth})!");
-                    var planStepNames = path.Select(s =>
-                    {
-                        try
-                        {
-                            var action = s.CreateAction();
-                            return action?.GetType().Name ?? "UnknownAction";
-                        }
-                        catch (Exception e)
-                        {
-                            GD.PushError($"Error creating action for plan debug: {e.Message}");
-                            return "ErrorAction";
-                        }
-                    });
-                    GD.Print($"Plan: {string.Join(" -> ", planStepNames)}");
+                    // Minimal summary log
+                    GD.Print($"Plan found: {path.Count} steps, total cost {gCost:F1}");
                     return new Plan(path, initialState);
                 }
             }
-            catch (Exception e)
+            catch
             {
-                GD.PushError($"Error checking state satisfaction: {e.Message}");
+                // Silent continue on satisfaction check
                 continue;
             }
 
             // More aggressive depth limiting
-            if (depth > 50)
+            if (path.Count > 50)
             {
-                GD.Print($"Skipping deep state (depth {depth})");
                 continue;
             }
 
             // Use all steps generated from initial state - no regeneration
             var applicableSteps = allSteps.Where(s => s.CanRun(currentState)).ToList();
-            // Initial state step analysis removed to reduce log noise
 
             foreach (var step in applicableSteps)
             {
@@ -142,45 +121,36 @@ public static class GOAPlanner
                     var newState = new State(newFacts);
                     var newPath = new List<Step>(path) { step };
 
-                    // Calculate heuristic for A* planning
+                    // Calculate f-score for A* planning (f = g + h)
                     try
                     {
-                        float heuristic = CalculateHeuristic(newState, goalState) + depth + 1;
-                        openSet.Add((newState, newPath, depth + 1, heuristic));
+                        double stepCost = step.GetCost(currentState);
+                        double newGCost = gCost + stepCost;
+                        float heuristic = CalculateHeuristic(newState, goalState);
+                        float fScore = (float)newGCost + heuristic;
+                        openSet.Add((newState, newPath, newGCost, fScore));
                     }
-                    catch (Exception e)
+                    catch
                     {
-                        GD.PushError($"Error calculating heuristic: {e.Message}");
+                        // Silent continue on heuristic error
                         continue;
                     }
                     enqueuedCount++;
                 }
-                catch (Exception e)
+                catch
                 {
-                    GD.PushError($"Error applying step effects: {e.Message}");
+                    // Silent continue on effects application
+                    continue;
                 }
 
                 // Limit open set size more aggressively
                 if (openSet.Count > 1000)
                 {
                     // Keep only the best candidates
-                    openSet.Sort((a, b) => a.heuristic.CompareTo(b.heuristic));
+                    openSet.Sort((a, b) => a.fScore.CompareTo(b.fScore));
                     openSet.RemoveRange(500, openSet.Count - 500);
                 }
             }
-        }
-
-        GD.Print($"BFS ended: dequeued {dequeuedCount}, enqueued {enqueuedCount}, visited {visited.Count}. No plan found.");
-        GD.Print($"Final state facts: {string.Join(", ", initialState.Facts.Select(kv => $"{kv.Key}={kv.Value}"))}");
-
-        // Debug: Check what the best state we found looks like
-        if (openSet.Count > 0)
-        {
-            openSet.Sort((a, b) => a.heuristic.CompareTo(b.heuristic));
-            var bestState = openSet[0].state;
-            GD.Print($"Best state found: {string.Join(", ", bestState.Facts.Select(kv => $"{kv.Key}={kv.Value}"))}");
-            GD.Print($"Best state heuristic: {CalculateHeuristic(bestState, goalState)}");
-            GD.Print($"Goal satisfaction: {bestState.Satisfies(goalState)}");
         }
 
         return null; // No plan found
@@ -208,11 +178,29 @@ public static class GOAPlanner
 
             if (goalFact.Key.EndsWith("Count") && goalFact.Value is int targetGoalCount2 && currentValue is int currentCount)
             {
-                heuristic += Math.Abs(currentCount - targetGoalCount2);
+                // For count facts, only penalize if we have LESS than needed (since we use >= comparison)
+                heuristic += Math.Max(0, targetGoalCount2 - currentCount);
             }
             else if (!currentValue.Equals(goalFact.Value))
             {
                 heuristic += 1f; // Boolean fact mismatch
+            }
+        }
+
+        // Special case: If goal is Near_Campfire but no campfire exists, add cost for gathering sticks
+        if (goalState.Facts.ContainsKey("Near_Campfire") && goalState.Facts["Near_Campfire"] is true)
+        {
+            bool hasCampfire = currentState.Facts.TryGetValue("World_Has_Campfire", out var hasCampfireValue) && hasCampfireValue is true;
+            if (!hasCampfire)
+            {
+                // Need to build campfire, which requires 16 sticks
+                const int STICKS_NEEDED = 16;
+                int currentSticks = currentState.Facts.TryGetValue("Agent_Stick_Count", out var sticksObj) && sticksObj is int sticks ? sticks : 0;
+                int sticksToGather = Math.Max(0, STICKS_NEEDED - currentSticks);
+                
+                // Each stick requires actions (goto tree, chop, pickup), estimate ~3 actions per 4 sticks
+                // Plus the build action
+                heuristic += sticksToGather * 0.75f + 1f;
             }
         }
 

@@ -28,7 +28,20 @@ public class Step
     {
         foreach (var precond in Preconditions)
         {
-            if (!ctx.Facts.TryGetValue(precond.Key, out var currentValue) || !currentValue.Equals(precond.Value))
+            if (!ctx.Facts.TryGetValue(precond.Key, out var currentValue))
+            {
+                return false;
+            }
+
+            // For count facts, check >= instead of exact equality
+            if (precond.Key.EndsWith("Count") && precond.Value is int requiredCount && currentValue is int actualCount)
+            {
+                if (actualCount < requiredCount)
+                {
+                    return false;
+                }
+            }
+            else if (!currentValue.Equals(precond.Value))
             {
                 return false;
             }

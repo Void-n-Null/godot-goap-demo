@@ -71,22 +71,16 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 
 				if (_currentPlan != null && _currentPlan.Steps.Count > 0)
 				{
-					GD.Print($"[{Entity.Name} ({Entity.Id.ToString()[..5]})] New plan for goal '{_currentGoal?.Name}': {_currentPlan.Steps.Count} steps");
-					for (int i = 0; i < _currentPlan.Steps.Count; i++)
-					{
-						var step = _currentPlan.Steps[i];
-						var action = step.CreateAction();
-						GD.Print($"  {i + 1}. {action.Name}");
-					}
+					GD.Print($"[{Entity.Name}] New plan for '{_currentGoal?.Name}': {_currentPlan.Steps.Count} steps");
 				}
 				else
 				{
-					GD.Print($"[{Entity.Name} ({Entity.Id.ToString()[..5]})] No plan found for goal '{_currentGoal?.Name}'");
+					GD.Print($"[{Entity.Name}] No plan for '{_currentGoal?.Name}'");
 				}
 			}
 			else if (_planningTask.IsFaulted)
 			{
-				GD.Print($"[{Entity.Name} ({Entity.Id.ToString()[..5]})] Planning failed: {_planningTask.Exception?.GetBaseException().Message}");
+				GD.Print($"[{Entity.Name}] Planning failed for '{_currentGoal?.Name}'");
 				_planningInProgress = false;
 				_planningTask = null;
 			}
@@ -155,7 +149,7 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 				}
 				else
 				{
-					GD.Print($"[{Entity.Name} ({Entity.Id.ToString()[..5]})] Plan of goal '{_currentGoal.Name}' failed, replanning...");
+					GD.Print($"[{Entity.Name}] Plan failed for '{_currentGoal?.Name}', replanning...");
 					_currentPlan = null;
 					_worldStateCache = null;
 					_lastWorldDataUpdate = -WORLD_DATA_UPDATE_INTERVAL;
@@ -182,13 +176,7 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 		{
 			var oldGoal = _currentGoal?.Name ?? "None";
 			_currentGoal = bestGoal.Goal;
-			GD.Print($"[{Entity.Name} ({Entity.Id.ToString()[..5]})] Switching goal: '{oldGoal}' -> '{_currentGoal.Name}' (utility: {bestGoal.Utility:F2})");
-			
-			// Debug: Show all utilities
-			foreach (var gu in goalUtilities)
-			{
-				GD.Print($"  - {gu.Goal.Name}: {gu.Utility:F2}");
-			}
+			GD.Print($"[{Entity.Name}] Goal switch: '{oldGoal}' → '{_currentGoal.Name}' (utility: {bestGoal.Utility:F2})");
 			
 			// Cancel current plan when goal changes
 			_currentPlan = null;
@@ -200,7 +188,6 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 	{
 		// Register available goals
 		_availableGoals.Add(new EatFoodGoal());
-		_availableGoals.Add(new GatherWoodGoal());
 		_availableGoals.Add(new StayWarmGoal());
 		_availableGoals.Add(new IdleGoal());
 
