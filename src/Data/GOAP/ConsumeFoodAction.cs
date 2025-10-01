@@ -12,6 +12,8 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
     private float _timer;
     private const float EAT_TIME = 2f; // 2 seconds to eat
 
+    public string Name => $"Consume {_foodTarget?.Name}";
+
     public void Enter(RuntimeContext ctx)
     {
         _timer = 0f;

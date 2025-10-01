@@ -4,8 +4,9 @@ using Game.Data.Components;
 
 namespace Game.Data.GOAP;
 
-[StepFactory]
-public class ConsumeFoodStepFactory : IStepFactory
+// DEPRECATED: Replaced by GenericStepFactory
+// [StepFactory]
+public class ConsumeFoodStepFactory_OLD // : IStepFactory
 {
     public List<Step> CreateSteps(State initialState)
     {

@@ -12,6 +12,7 @@ public enum TargetType
     Stone,
     Tree,  // For chopping
     Bed,   // For sleeping/resting
+    Campfire,  // For warmth and cooking
     // Add more interactables as needed, e.g., Fire for burning, NPC for following
 }
 

@@ -9,6 +9,8 @@ public interface IAction
     // Called once when the step begins. Must be idempotent (safe to call again after a Cancel).
     void Enter(RuntimeContext ctx);
 
+    string Name { get; }
+
     // Called every tick until it returns Succeeded or Failed.
     // No side-effects that would make re-Enter unsafe.
     ActionStatus Update(RuntimeContext ctx, float dt);

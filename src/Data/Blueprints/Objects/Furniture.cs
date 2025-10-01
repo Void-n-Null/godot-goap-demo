@@ -11,7 +11,7 @@ public static class Furniture
 		name: "BaseFurniture",
 		addTags: [ Tags.Furniture, Tags.Flammable, Tags.Wooden ],
 		addComponents: () => [
-			new FlammableComponent(startOnFire: false, flameTexturePath: "res://textures/Flame.png"),
+			new FlammableComponent(startOnFire: false),
 			new HealthComponent(maxHealth: 100),
 			new LootDropComponent 
 			{ 

@@ -20,6 +20,8 @@ public static class Tags
     public static readonly Tag Food = Tag.From("Food");
     public static readonly Tag Tree = Tag.From("Tree");
     public static readonly Tag Wooden = Tag.From("Wooden");
+    public static readonly Tag Campfire = Tag.From("Campfire");
+    public static readonly Tag HeatSource = Tag.From("HeatSource");
 }
 
 
