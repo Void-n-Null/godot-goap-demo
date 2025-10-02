@@ -35,12 +35,10 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
         set
         {
             if (_position == value) return;
+            if (Entity == null) return; // Don't allow changes before attachment
             _position = value;
             DirtyMask |= TransformDirtyFlags.Position;
-            if (Entity != null)
-            {
-                PositionChanged?.Invoke(Entity);
-            }
+            PositionChanged?.Invoke(Entity);
         }
     }
 
@@ -50,12 +48,10 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
         set
         {
             if (Mathf.IsEqualApprox(_rotation, value)) return;
+            if (Entity == null) return; // Don't allow changes before attachment
             _rotation = value;
             DirtyMask |= TransformDirtyFlags.Rotation;
-                if (Entity != null)
-                {
-                    RotationChanged?.Invoke(Entity);
-                }
+            RotationChanged?.Invoke(Entity);
         }
     }
 
@@ -65,12 +61,10 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
         set
         {
             if (_scale == value) return;
+            if (Entity == null) return; // Don't allow changes before attachment
             _scale = value;
             DirtyMask |= TransformDirtyFlags.Scale;
-                if (Entity != null)
-                {
-                    ScaleChanged?.Invoke(Entity);
-                }
+            ScaleChanged?.Invoke(Entity);
         }
     }
 

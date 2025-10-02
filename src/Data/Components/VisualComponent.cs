@@ -77,6 +77,9 @@ public class VisualComponent(string ScenePath = null) : IComponent
 
 	public void OnPostAttached()
 	{
+		// Unsubscribe from any previous transform first (in case of component replacement)
+		UnsubscribeFromTransform();
+
 		_transform2D = Entity.GetComponent<TransformComponent2D>();
 		if (_transform2D == null) return;
 
@@ -95,7 +98,7 @@ public class VisualComponent(string ScenePath = null) : IComponent
 		var scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
 		var visualPosition = _transform2D.Position + VisualOriginOffset;
 		var zBias = -VisualOriginOffset.Y; // Compensate for visual offset to keep Y-based sorting at entity position
-		
+
 		// Only add sprite if we have a valid texture
 		if (texture != null)
 		{
@@ -124,6 +127,13 @@ public class VisualComponent(string ScenePath = null) : IComponent
 			CustomEntityRenderEngineLocator.Renderer?.RemoveSprite(_id);
 			_id = 0UL;
 		}
+		UnsubscribeFromTransform();
+		_overlayDirty = false;
+		_hasOverlay = false;
+	}
+
+	private void UnsubscribeFromTransform()
+	{
 		if (_transform2D != null)
 		{
 			_transform2D.PositionChanged -= OnTransformChanged;
@@ -131,8 +141,6 @@ public class VisualComponent(string ScenePath = null) : IComponent
 			_transform2D.ScaleChanged -= OnTransformChanged;
 			_transform2D = null;
 		}
-		_overlayDirty = false;
-		_hasOverlay = false;
 	}
 
 	public void SetGradientOverlay(float intensity, Color top, Color bottom, Color? blend = null, Vector2? direction = null)
@@ -177,6 +185,8 @@ public class VisualComponent(string ScenePath = null) : IComponent
 
 	private void OnTransformChanged(Entity _)
 	{
+		// Guard against null transform in case component was replaced
+		if (_transform2D == null) return;
 		PushTransform();
 	}
 }

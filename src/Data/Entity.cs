@@ -157,6 +157,10 @@ public class Entity : IUpdatableEntity
         var key = component.GetType();
         if (_components.TryGetValue(key, out var existing))
         {
+            // Invalidate caches before detaching
+            if (existing == _transform) _transform = null;
+            if (existing == _visual) _visual = null;
+
             if (existing is IActiveComponent existingActive)
             {
                 _activeComponents.Remove(existingActive);
@@ -209,6 +213,10 @@ public class Entity : IUpdatableEntity
         var key = component.GetType();
         if (_components.TryGetValue(key, out var existing))
         {
+            // Invalidate caches before detaching
+            if (existing == _transform) _transform = null;
+            if (existing == _visual) _visual = null;
+
             if (existing is IActiveComponent existingActive)
             {
                 _activeComponents.Remove(existingActive);
@@ -284,9 +292,9 @@ public class Entity : IUpdatableEntity
             {
                 _activeComponents.Remove(active);
             }
-            // Invalidate caches for known component types
-            if (typeof(T) == typeof(TransformComponent2D)) _transform = null;
-            else if (typeof(T) == typeof(VisualComponent)) _visual = null;
+            // Invalidate caches for known component types - check actual instance, not generic parameter
+            if (component == _transform) _transform = null;
+            if (component == _visual) _visual = null;
             bool removed = _components.Remove(typeof(T));
             if (wasActive && !HasActiveComponents)
             {
