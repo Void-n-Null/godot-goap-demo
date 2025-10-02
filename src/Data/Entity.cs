@@ -264,10 +264,15 @@ public class Entity : IUpdatableEntity
     private void CompleteAttachment()
     {
         bool wasActive = HasActiveComponents;
-        foreach (var component in _components.Values)
+        // Create a snapshot to avoid modification-during-iteration issues
+        var componentsSnapshot = _components.Values.ToArray();
+        foreach (var component in componentsSnapshot)
         {
+            // Skip if component was removed during initialization
+            if (component.Entity != this) continue;
+
             component.OnPostAttached();
-            if (component is IActiveComponent active)
+            if (component is IActiveComponent active && !_activeComponents.Contains(active))
             {
                 _activeComponents.Add(active);
             }
@@ -286,15 +291,17 @@ public class Entity : IUpdatableEntity
         bool wasActive = HasActiveComponents;
         if (_components.TryGetValue(typeof(T), out var component))
         {
+            // Invalidate caches for known component types BEFORE calling OnDetached
+            // to ensure consistency with AddComponent behavior
+            if (component == _transform) _transform = null;
+            if (component == _visual) _visual = null;
+
             component.OnDetached();
             component.Entity = null;
             if (component is IActiveComponent active)
             {
                 _activeComponents.Remove(active);
             }
-            // Invalidate caches for known component types - check actual instance, not generic parameter
-            if (component == _transform) _transform = null;
-            if (component == _visual) _visual = null;
             bool removed = _components.Remove(typeof(T));
             if (wasActive && !HasActiveComponents)
             {

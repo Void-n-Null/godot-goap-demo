@@ -99,8 +99,9 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		_isProcessingTick = true;
 		try
 		{
-		int totalSlices = GameManager.Instance?.CurrentTickSliceCount ?? 1;
-		int sliceIndex = GameManager.Instance?.CurrentTickSliceIndex ?? 0;
+		var gameManager = GameManager.Instance;
+		int totalSlices = gameManager?.CurrentTickSliceCount ?? 1;
+		int sliceIndex = gameManager?.CurrentTickSliceIndex ?? 0;
 		
 		// CRITICAL: Only update entities on the FIRST slice of a tick
 		// Slicing is for spreading work across frames, NOT for calling entities multiple times
@@ -194,12 +195,13 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 				EnsureSpatialIndex();
 				_spatialIndex.Sync(concrete);
 				HookSpatialTracking(concrete);
-				HookActiveTracking(concrete);
-				// Seed active list if already active
+				// Seed active list if already active BEFORE hooking events
+				// to avoid double-addition when the event fires
 				if (concrete.HasActiveComponents && !_activeEntities.Contains(concrete))
 				{
 					_activeEntities.Add(concrete);
 				}
+				HookActiveTracking(concrete);
 			}
 			return true;
 		}
@@ -373,6 +375,8 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		}
 	}
 
+	private readonly Dictionary<Entity, TransformComponent2D> _spatialTrackedTransforms = new();
+
 	private void HookSpatialTracking(Entity entity)
 	{
 		if (entity == null || _spatialTracked.Contains(entity))
@@ -384,6 +388,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		var transform = entity.Transform;
 		if (transform != null)
 		{
+			_spatialTrackedTransforms[entity] = transform;
 			transform.PositionChanged += OnEntityMoved;
 		}
 	}
@@ -395,10 +400,11 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 			return;
 		}
 
-		var transform = entity.Transform;
-		if (transform != null)
+		// Unsubscribe from the tracked transform, not the current one
+		if (_spatialTrackedTransforms.TryGetValue(entity, out var transform))
 		{
 			transform.PositionChanged -= OnEntityMoved;
+			_spatialTrackedTransforms.Remove(entity);
 		}
 	}
 

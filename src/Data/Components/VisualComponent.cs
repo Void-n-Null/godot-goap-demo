@@ -80,8 +80,10 @@ public class VisualComponent(string ScenePath = null) : IComponent
 		// Unsubscribe from any previous transform first (in case of component replacement)
 		UnsubscribeFromTransform();
 
-		_transform2D = Entity.GetComponent<TransformComponent2D>();
-		if (_transform2D == null) return;
+		var transform = Entity.GetComponent<TransformComponent2D>();
+		if (transform == null) return;
+
+		_transform2D = transform;
 
 		// Subscribe to transform change events for event-driven updates
 		_transform2D.PositionChanged += OnTransformChanged;
@@ -183,10 +185,12 @@ public class VisualComponent(string ScenePath = null) : IComponent
 		_overlayDirty = false;
 	}
 
-	private void OnTransformChanged(Entity _)
+	private void OnTransformChanged(Entity entity)
 	{
-		// Guard against null transform in case component was replaced
-		if (_transform2D == null) return;
+		// Verify the event is still from our current tracked transform
+		// If the transform was replaced, ignore stale events
+		if (_transform2D == null || entity != Entity) return;
+		if (Entity.Transform != _transform2D) return;
 		PushTransform();
 	}
 }

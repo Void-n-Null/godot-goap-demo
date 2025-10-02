@@ -24,6 +24,8 @@ public class HealthComponent : IComponent
 
     public Entity Entity { get; set; }
 
+    private Action<float> _visualHealthFeedbackHandler;
+
     public HealthComponent(float maxHealth = 100f, Action onDeathAction = null)
     {
         MaxHealth = maxHealth;
@@ -76,8 +78,9 @@ public class HealthComponent : IComponent
         var visual = Entity.GetComponent<VisualComponent>();
         if (visual != null)
         {
-            // Could set up visual feedback for health changes
-            OnHealthChanged += (health) => UpdateVisualHealthFeedback(visual, health);
+            // Store the handler so we can properly unsubscribe later
+            _visualHealthFeedbackHandler = (health) => UpdateVisualHealthFeedback(visual, health);
+            OnHealthChanged += _visualHealthFeedbackHandler;
         }
     }
 
@@ -108,6 +111,11 @@ public class HealthComponent : IComponent
     public void OnDetached()
     {
         // Clean up event handlers
+        if (_visualHealthFeedbackHandler != null)
+        {
+            OnHealthChanged -= _visualHealthFeedbackHandler;
+            _visualHealthFeedbackHandler = null;
+        }
         OnHealthChanged = null;
         OnDeathAction = null;
     }

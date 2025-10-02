@@ -22,6 +22,7 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
     private Vector2 _position = Position;
     private float _rotation = Rotation;
     private Vector2 _scale = Scale ?? Vector2.One;
+    private bool _isAttached = false;
 
     public event Action<Entity> PositionChanged;
         public event Action<Entity> RotationChanged;
@@ -35,7 +36,7 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
         set
         {
             if (_position == value) return;
-            if (Entity == null) return; // Don't allow changes before attachment
+            if (!_isAttached) return; // Don't allow changes before attachment
             _position = value;
             DirtyMask |= TransformDirtyFlags.Position;
             PositionChanged?.Invoke(Entity);
@@ -48,7 +49,7 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
         set
         {
             if (Mathf.IsEqualApprox(_rotation, value)) return;
-            if (Entity == null) return; // Don't allow changes before attachment
+            if (!_isAttached) return; // Don't allow changes before attachment
             _rotation = value;
             DirtyMask |= TransformDirtyFlags.Rotation;
             RotationChanged?.Invoke(Entity);
@@ -61,7 +62,7 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
         set
         {
             if (_scale == value) return;
-            if (Entity == null) return; // Don't allow changes before attachment
+            if (!_isAttached) return; // Don't allow changes before attachment
             _scale = value;
             DirtyMask |= TransformDirtyFlags.Scale;
             ScaleChanged?.Invoke(Entity);
@@ -72,5 +73,16 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
     {
         DirtyMask &= ~mask;
     }
+
+    public void OnPreAttached()
+    {
+        _isAttached = true;
+    }
+
+    public void OnDetached()
+    {
+        _isAttached = false;
+    }
+
     public Entity Entity { get; set; }
 }
