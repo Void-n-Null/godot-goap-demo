@@ -190,3 +190,4 @@ public class FireVisualComponent(
         _visual.SetGradientOverlay(pulse, top, bottom, blend, Vector2.Up);
     }
 }
+
