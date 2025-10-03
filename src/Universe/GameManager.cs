@@ -120,7 +120,7 @@ public partial class GameManager : SingletonNode<GameManager>
 			SpawnEntity.Now(Food.RawBeef, Utils.Random.NextVector2(-15000, 15000));
 		
 		// Spawn NPCs with randomized hunger
-		for (int i = 0; i < 200; i++)
+		for (int i = 0; i < 500; i++)
 			SpawnEntity.Now(NPC.Intelligent, Utils.Random.NextVector2(-3000, 3000));
 		// for (int i = 0; i < 15000; i++)
 		// 	SpawnEntity.Now(Items.Stick, Utils.Random.NextVector2(-10000, 10000));

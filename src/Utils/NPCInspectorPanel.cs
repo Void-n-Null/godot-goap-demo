@@ -294,80 +294,93 @@ public partial class NPCInspectorPanel : SingletonNode<NPCInspectorPanel>
 			_inventoryLabel.Text = invSb.ToString();
 		}
 
-		// AI Behavior
-		if (_selectedNPC.TryGetComponent<UtilityAIBehaviorV2>(out var aiBehavior))
+		// AI Behavior (use new components: UtilityGoalSelector + AIGoalExecutor)
 		{
-			var aiSb = new StringBuilder();
-			
-			// Use reflection to get current goal and plan info
-			var currentGoalField = typeof(UtilityAIBehaviorV2).GetField("_currentGoal", 
-				System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-			var currentPlanField = typeof(UtilityAIBehaviorV2).GetField("_currentPlan",
-				System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-			var availableGoalsField = typeof(UtilityAIBehaviorV2).GetField("_availableGoals",
-				System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-			
-			var currentGoal = currentGoalField?.GetValue(aiBehavior) as Data.UtilityAI.IUtilityGoal;
-			var currentPlan = currentPlanField?.GetValue(aiBehavior) as Data.GOAP.Plan;
-			var availableGoals = availableGoalsField?.GetValue(aiBehavior) as System.Collections.Generic.List<Data.UtilityAI.IUtilityGoal>;
-
-			// Current goal
-			if (currentGoal != null)
+			var hasSelector = _selectedNPC.TryGetComponent<UtilityGoalSelector>(out var selector);
+			var hasExecutor = _selectedNPC.TryGetComponent<AIGoalExecutor>(out var executor);
+			if (!hasSelector && !hasExecutor)
 			{
-				aiSb.AppendLine($"🎯 Active Goal: {currentGoal.Name}");
-				var utility = currentGoal.CalculateUtility(_selectedNPC);
-				aiSb.AppendLine($"   Utility: {utility:F2}");
+				_aiLabel.Text = "(No AI behavior)";
 			}
 			else
 			{
-				aiSb.AppendLine($"🎯 Active Goal: None");
-			}
+				var aiSb = new StringBuilder();
 
-			aiSb.AppendLine();
-
-			// Current plan
-			if (currentPlan != null && !currentPlan.IsComplete)
-			{
-				aiSb.AppendLine($"📋 Plan: {currentPlan.Steps.Count} steps");
-				aiSb.AppendLine($"   Status: In Progress");
-			}
-			else if (currentPlan != null && currentPlan.Succeeded)
-			{
-				aiSb.AppendLine("📋 Plan: Completed ✓");
-			}
-			else if (currentPlan != null)
-			{
-				aiSb.AppendLine("📋 Plan: Failed ✗");
-			}
-			else
-			{
-				aiSb.AppendLine("📋 Plan: (none)");
-			}
-
-			aiSb.AppendLine();
-
-			// Goal utilities
-			if (availableGoals != null && availableGoals.Count > 0)
-			{
-				aiSb.AppendLine("📊 Goal Utilities:");
-				var utilities = availableGoals
-					.Select(g => new { Goal = g, Utility = g.CalculateUtility(_selectedNPC) })
-					.OrderByDescending(x => x.Utility)
-					.ToList();
-
-				foreach (var u in utilities)
+				// Current goal from selector
+				Data.UtilityAI.IUtilityGoal currentGoal = null;
+				System.Collections.Generic.List<Data.UtilityAI.IUtilityGoal> availableGoals = null;
+				if (hasSelector && selector != null)
 				{
-					var bar = FormatMiniBar(u.Utility, 1.0f);
-					var marker = u.Goal == currentGoal ? "▶" : " ";
-					aiSb.AppendLine($" {marker} {u.Goal.Name}: {bar} {u.Utility:F2}");
+					var selType = typeof(UtilityGoalSelector);
+					var currentGoalField = selType.GetField("_currentGoal", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+					var availableGoalsField = selType.GetField("_availableGoals", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+					currentGoal = currentGoalField?.GetValue(selector) as Data.UtilityAI.IUtilityGoal;
+					availableGoals = availableGoalsField?.GetValue(selector) as System.Collections.Generic.List<Data.UtilityAI.IUtilityGoal>;
 				}
-			}
 
-			_aiLabel.Text = aiSb.ToString();
-		}
-		else
-		{
-			_aiLabel.Text = "(No AI behavior)";
+				// Current plan from executor
+				Data.GOAP.Plan currentPlan = null;
+				if (hasExecutor && executor != null)
+				{
+					var execType = typeof(AIGoalExecutor);
+					var currentPlanField = execType.GetField("_currentPlan", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+					currentPlan = currentPlanField?.GetValue(executor) as Data.GOAP.Plan;
+				}
+
+				// Current goal section
+				if (currentGoal != null)
+				{
+					aiSb.AppendLine($"🎯 Active Goal: {currentGoal.Name}");
+					var utility = currentGoal.CalculateUtility(_selectedNPC);
+					aiSb.AppendLine($"   Utility: {utility:F2}");
+				}
+				else
+				{
+					aiSb.AppendLine("🎯 Active Goal: None");
+				}
+
+				aiSb.AppendLine();
+
+				// Current plan section
+				if (currentPlan != null && !currentPlan.IsComplete)
+				{
+					aiSb.AppendLine($"📋 Plan: {currentPlan.Steps.Count} steps");
+					aiSb.AppendLine("   Status: In Progress");
+				}
+				else if (currentPlan != null && currentPlan.Succeeded)
+				{
+					aiSb.AppendLine("📋 Plan: Completed ✓");
+				}
+				else if (currentPlan != null)
+				{
+					aiSb.AppendLine("📋 Plan: Failed ✗");
+				}
+				else
+				{
+					aiSb.AppendLine("📋 Plan: (none)");
+				}
+
+				aiSb.AppendLine();
+
+				// Goal utilities from selector
+				if (availableGoals != null && availableGoals.Count > 0)
+				{
+					aiSb.AppendLine("📊 Goal Utilities:");
+					var utilities = availableGoals
+						.Select(g => new { Goal = g, Utility = g.CalculateUtility(_selectedNPC) })
+						.OrderByDescending(x => x.Utility)
+						.ToList();
+
+					foreach (var u in utilities)
+					{
+						var bar = FormatMiniBar(u.Utility, 1.0f);
+						var marker = u.Goal == currentGoal ? "▶" : " ";
+						aiSb.AppendLine($" {marker} {u.Goal.Name}: {bar} {u.Utility:F2}");
+					}
+				}
+
+				_aiLabel.Text = aiSb.ToString();
+			}
 		}
 	}
 
