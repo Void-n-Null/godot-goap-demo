@@ -29,10 +29,8 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
         _actionName = actionName;
     }
 
-    public void Enter(RuntimeContext ctx)
+    public void Enter(Entity agent)
     {
-        var agent = ctx.Agent;
-        
         if (!agent.TryGetComponent<NPCMotorComponent>(out _motor))
         {
             Fail("Agent lacks NPCMotorComponent");
@@ -40,7 +38,7 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
         }
 
         // Find target entity
-        var candidates = ctx.World.EntityManager
+        var candidates = ServiceLocator.EntityManager
             .QueryByComponent<TransformComponent2D>(agent.Transform.Position, _finderConfig.SearchRadius)
             .Where(_finderConfig.Filter);
 
@@ -73,14 +71,14 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
         }
 
         GD.Print($"[{agent.Name}] {_actionName}: Moving to {_targetEntity.Name} at {_targetEntity.Transform.Position}");
-        
+
         _motor.OnTargetReached += OnArrived;
         _motor.Target = _targetEntity.Transform.Position;
     }
 
     private void OnArrived() => _arrived = true;
 
-    public ActionStatus Update(RuntimeContext ctx, float dt)
+    public ActionStatus Update(Entity agent, float dt)
     {
         if (_failed || _targetEntity == null)
             return ActionStatus.Failed;
@@ -89,7 +87,7 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
             return ActionStatus.Succeeded;
 
         // Check distance manually as fallback
-        var distance = ctx.Agent.Transform.Position.DistanceTo(_targetEntity.Transform.Position);
+        var distance = agent.Transform.Position.DistanceTo(_targetEntity.Transform.Position);
         if (distance <= _reachDistance)
         {
             _arrived = true;
@@ -99,7 +97,7 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
         return ActionStatus.Running;
     }
 
-    public void Exit(RuntimeContext ctx, ActionExitReason reason)
+    public void Exit(Entity agent, ActionExitReason reason)
     {
         if (_motor != null)
         {
@@ -107,20 +105,20 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
             if (reason != ActionExitReason.Completed)
             {
                 _motor.Target = null;
-                
+
                 // Release reservation if we didn't complete
                 if (_finderConfig.ShouldReserve && _targetEntity != null)
                 {
-                    ResourceReservationManager.Instance.Release(_targetEntity, ctx.Agent);
+                    ResourceReservationManager.Instance.Release(_targetEntity, agent);
                 }
             }
         }
     }
 
-    public bool StillValid(RuntimeContext ctx)
+    public bool StillValid(Entity agent)
     {
         if (_failed) return false;
-        
+
         // Check if target still exists
         if (_targetEntity == null || !EntityManager.Instance.AllEntities.Contains(_targetEntity))
             return false;

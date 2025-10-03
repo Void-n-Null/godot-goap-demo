@@ -56,9 +56,6 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 		var currentState = (_worldStateCache != null && !_worldStateCache.IsExpired(currentTime, STATE_CACHE_DURATION))
 			? new State(_worldStateCache.CachedFacts)
 			: BuildCurrentState();
-		
-		// Create runtime context for execution
-		var runtimeCtx = new RuntimeContext(Entity, new World { EntityManager = EntityManager.Instance, GameManager = GameManager.Instance });
 
 		// Handle async planning completion
 		if (_planningInProgress && _planningTask != null)
@@ -133,7 +130,7 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 		// Execute current plan
 		if (_currentPlan != null && !_currentPlan.IsComplete)
 		{
-			var tickResult = _currentPlan.Tick(runtimeCtx, (float)delta);
+			var tickResult = _currentPlan.Tick(Entity, (float)delta);
 
 			// Clear world state cache when plan makes changes
 			if (tickResult && _currentPlan.Succeeded)

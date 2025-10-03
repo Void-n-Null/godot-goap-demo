@@ -28,15 +28,15 @@ public sealed class Plan
         Succeeded = IsComplete; // Empty plan is trivially succeeded
     }
 
-    public bool Tick(RuntimeContext ctx, float dt)
+    public bool Tick(Entity agent, float dt)
     {
         if (IsComplete) return true;
 
         // Check runtime guard validity for current action
-        if (_currentAction is IRuntimeGuard guard && !guard.StillValid(ctx))
+        if (_currentAction is IRuntimeGuard guard && !guard.StillValid(agent))
         {
             GD.Print($"Plan step {_currentStepIndex} no longer valid, failing plan");
-            _currentAction.Exit(ctx, ActionExitReason.Failed);
+            _currentAction.Exit(agent, ActionExitReason.Failed);
             _currentAction = null;
             IsComplete = true;
             Succeeded = false;
@@ -58,11 +58,11 @@ public sealed class Plan
             GD.Print($"Plan starting step {_currentStepIndex}: {step.Preconditions.Count} preconditions, {step.Effects.Count} effects");
 
             _currentAction = step.CreateAction();
-            _currentAction.Enter(ctx);
+            _currentAction.Enter(agent);
             GD.Print($"{_currentStepIndex + 1}. {_currentAction.GetType().Name}");
         }
 
-        var status = _currentAction.Update(ctx, dt);  // Pass real dt to action
+        var status = _currentAction.Update(agent, dt);  // Pass real dt to action
         if (status != ActionStatus.Running){
             GD.Print($"Step {_currentStepIndex} {_currentAction.GetType().Name} Update returned {status}");
         }
@@ -71,7 +71,7 @@ public sealed class Plan
         if (status == ActionStatus.Running) return false;
 
         var reason = status == ActionStatus.Succeeded ? ActionExitReason.Completed : ActionExitReason.Failed;
-        _currentAction.Exit(ctx, reason);
+        _currentAction.Exit(agent, reason);
         if (status == ActionStatus.Failed) _currentAction.Fail("Plan preempted step due to failure");
 
         if (status == ActionStatus.Succeeded)
@@ -102,11 +102,11 @@ public sealed class Plan
         return _currentStepIndex >= _steps.Count - 1; // Continue if more steps
     }
 
-    public void Cancel(RuntimeContext ctx)
+    public void Cancel(Entity agent)
     {
         if (_currentAction != null)
         {
-            _currentAction.Exit(ctx, ActionExitReason.Cancelled);
+            _currentAction.Exit(agent, ActionExitReason.Cancelled);
             _currentAction = null;
         }
         _currentStepIndex = -1;

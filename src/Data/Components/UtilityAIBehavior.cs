@@ -78,9 +78,6 @@ public class UtilityAIBehavior : IActiveComponent
 		var currentState = (_worldStateCache != null && !_worldStateCache.IsExpired(currentTime, STATE_CACHE_DURATION))
 			? new State(_worldStateCache.CachedFacts)
 			: BuildCurrentState();
-		
-		// Create runtime context for execution
-		var runtimeCtx = new RuntimeContext(Entity, new World { EntityManager = EntityManager.Instance, GameManager = GameManager.Instance });
 
 		// Update tracked facts from current state
 		foreach (var fact in currentState.Facts)
@@ -181,7 +178,7 @@ public class UtilityAIBehavior : IActiveComponent
 
 		if (_currentPlan != null && !_currentPlan.IsComplete)
 		{
-			var tickResult = _currentPlan.Tick(runtimeCtx, (float)delta);
+			var tickResult = _currentPlan.Tick(Entity, (float)delta);
 			_trackedFacts = new Dictionary<string, object>(_currentPlan.CurrentState.Facts); // Sync after every tick
 
 			// Clear world state cache when plan makes changes to ensure fresh state building

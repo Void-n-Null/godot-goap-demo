@@ -64,10 +64,10 @@ public class EntityFinderConfig
 /// </summary>
 public class InteractionEffectConfig
 {
-    public Action<RuntimeContext, Entity> OnComplete { get; set; }
+    public Action<Entity, Entity> OnComplete { get; set; }
     public bool DestroyTargetOnComplete { get; set; } = false;
     public bool ReleaseReservationOnComplete { get; set; } = true;
-    
+
     /// <summary>
     /// Pick up item into inventory
     /// </summary>
@@ -75,9 +75,9 @@ public class InteractionEffectConfig
     {
         return new InteractionEffectConfig
         {
-            OnComplete = (ctx, target) =>
+            OnComplete = (agent, target) =>
             {
-                if (ctx.Agent.TryGetComponent<NPCData>(out var npcData))
+                if (agent.TryGetComponent<NPCData>(out var npcData))
                 {
                     npcData.Resources[resourceType] = (npcData.Resources.TryGetValue(resourceType, out var count) ? count : 0) + 1;
                     GD.Print($"Picked up 1 {resourceType}; total: {npcData.Resources[resourceType]}");
@@ -95,7 +95,7 @@ public class InteractionEffectConfig
     {
         return new InteractionEffectConfig
         {
-            OnComplete = (ctx, target) =>
+            OnComplete = (agent, target) =>
             {
                 if (target.TryGetComponent<HealthComponent>(out var health))
                 {
@@ -115,10 +115,10 @@ public class InteractionEffectConfig
     {
         return new InteractionEffectConfig
         {
-            OnComplete = (ctx, target) =>
+            OnComplete = (agent, target) =>
             {
-                if (target.TryGetComponent<FoodData>(out var foodData) && 
-                    ctx.Agent.TryGetComponent<NPCData>(out var npcData))
+                if (target.TryGetComponent<FoodData>(out var foodData) &&
+                    agent.TryGetComponent<NPCData>(out var npcData))
                 {
                     float hungerRestored = foodData.HungerRestoredOnConsumption;
                     npcData.Hunger = Mathf.Max(0, npcData.Hunger - hungerRestored);
@@ -137,25 +137,25 @@ public class InteractionEffectConfig
     {
         return new InteractionEffectConfig
         {
-            OnComplete = (ctx, target) =>
+            OnComplete = (agent, target) =>
             {
                 // This is a special case - we're not interacting with an existing entity
                 // We're creating a new campfire at the agent's location
-                if (ctx.Agent.TryGetComponent<NPCData>(out var npcData) &&
-                    ctx.Agent.TryGetComponent<TransformComponent2D>(out var transform))
+                if (agent.TryGetComponent<NPCData>(out var npcData) &&
+                    agent.TryGetComponent<TransformComponent2D>(out var transform))
                 {
                     // Deduct sticks from inventory
                     int currentSticks = npcData.Resources.GetValueOrDefault(TargetType.Stick, 0);
                     if (currentSticks >= sticksRequired)
                     {
                         npcData.Resources[TargetType.Stick] = currentSticks - sticksRequired;
-                        
+
                         // Spawn campfire at agent's position
                         var campfire = Universe.SpawnEntity.Now(
                             Game.Data.Blueprints.Objects.Campfire.SimpleCampfire,
                             transform.Position
                         );
-                        
+
                         GD.Print($"Built campfire at {transform.Position}! Sticks remaining: {npcData.Resources[TargetType.Stick]}");
                     }
                     else
@@ -169,7 +169,7 @@ public class InteractionEffectConfig
         };
     }
 
-    public static InteractionEffectConfig Arbitrary(Action<RuntimeContext, Entity> onComplete)
+    public static InteractionEffectConfig Arbitrary(Action<Entity, Entity> onComplete)
     {
         return new InteractionEffectConfig
         {

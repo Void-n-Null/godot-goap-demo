@@ -35,13 +35,12 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
         _actionName = actionName;
     }
 
-    public void Enter(RuntimeContext ctx)
+    public void Enter(Entity agent)
     {
         _timer = 0f;
         _completed = false;
-        
-        var agent = ctx.Agent;
-        var candidates = ctx.World.EntityManager
+
+        var candidates = ServiceLocator.EntityManager
             .QueryByComponent<TransformComponent2D>(agent.Transform.Position, _finderConfig.SearchRadius)
             .Where(_finderConfig.Filter);
 
@@ -69,7 +68,7 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
         GD.Print($"[{agent.Name}] {_actionName}: Starting interaction with {_targetEntity.Name} (duration: {_interactionTime}s)");
     }
 
-    public ActionStatus Update(RuntimeContext ctx, float dt)
+    public ActionStatus Update(Entity agent, float dt)
     {
         if (_failed || _targetEntity == null)
             return ActionStatus.Failed;
@@ -82,17 +81,17 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
         if (_timer >= _interactionTime)
         {
             // Execute effect
-            _effectConfig.OnComplete?.Invoke(ctx, _targetEntity);
+            _effectConfig.OnComplete?.Invoke(agent, _targetEntity);
 
             // Handle cleanup
             if (_effectConfig.ReleaseReservationOnComplete)
             {
-                ResourceReservationManager.Instance.Release(_targetEntity, ctx.Agent);
+                ResourceReservationManager.Instance.Release(_targetEntity, agent);
             }
 
             if (_effectConfig.DestroyTargetOnComplete)
             {
-                ctx.World.EntityManager.UnregisterEntity(_targetEntity);
+                ServiceLocator.EntityManager.UnregisterEntity(_targetEntity);
                 _targetEntity.Destroy();
             }
 
@@ -104,7 +103,7 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
         return ActionStatus.Running;
     }
 
-    public void Exit(RuntimeContext ctx, ActionExitReason reason)
+    public void Exit(Entity agent, ActionExitReason reason)
     {
         if (reason != ActionExitReason.Completed)
         {
@@ -112,11 +111,11 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
         }
     }
 
-    public bool StillValid(RuntimeContext ctx)
+    public bool StillValid(Entity agent)
     {
-        if (_failed || _targetEntity == null) 
+        if (_failed || _targetEntity == null)
             return false;
-        
+
         return EntityManager.Instance.AllEntities.Contains(_targetEntity);
     }
 

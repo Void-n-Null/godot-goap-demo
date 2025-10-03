@@ -25,13 +25,11 @@ public sealed class BuildCampfireAction : IAction, IRuntimeGuard
         _buildTime = buildTime;
     }
 
-    public void Enter(RuntimeContext ctx)
+    public void Enter(Entity agent)
     {
         _timer = 0f;
         _completed = false;
         _failed = false;
-
-        var agent = ctx.Agent;
 
         // Check if agent has enough sticks
         if (!agent.TryGetComponent<NPCData>(out var npcData))
@@ -50,7 +48,7 @@ public sealed class BuildCampfireAction : IAction, IRuntimeGuard
         GD.Print($"[{agent.Name}] BuildCampfire: Starting construction (duration: {_buildTime}s, cost: {_sticksRequired} sticks)");
     }
 
-    public ActionStatus Update(RuntimeContext ctx, float dt)
+    public ActionStatus Update(Entity agent, float dt)
     {
         if (_failed) return ActionStatus.Failed;
         if (_completed) return ActionStatus.Succeeded;
@@ -59,8 +57,6 @@ public sealed class BuildCampfireAction : IAction, IRuntimeGuard
 
         if (_timer >= _buildTime)
         {
-            var agent = ctx.Agent;
-            
             if (!agent.TryGetComponent<NPCData>(out var npcData) ||
                 !agent.TryGetComponent<TransformComponent2D>(out var transform))
             {
@@ -93,7 +89,7 @@ public sealed class BuildCampfireAction : IAction, IRuntimeGuard
         return ActionStatus.Running;
     }
 
-    public void Exit(RuntimeContext ctx, ActionExitReason reason)
+    public void Exit(Entity agent, ActionExitReason reason)
     {
         if (reason != ActionExitReason.Completed)
         {
@@ -101,12 +97,12 @@ public sealed class BuildCampfireAction : IAction, IRuntimeGuard
         }
     }
 
-    public bool StillValid(RuntimeContext ctx)
+    public bool StillValid(Entity agent)
     {
         if (_failed) return false;
 
         // Check if agent still has enough sticks
-        if (ctx.Agent.TryGetComponent<NPCData>(out var npcData))
+        if (agent.TryGetComponent<NPCData>(out var npcData))
         {
             int currentSticks = npcData.Resources.TryGetValue(TargetType.Stick, out var stickCount) ? stickCount : 0;
             return currentSticks >= _sticksRequired;

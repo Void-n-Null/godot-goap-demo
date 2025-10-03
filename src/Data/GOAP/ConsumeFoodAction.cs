@@ -14,16 +14,16 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
 
     public string Name => $"Consume {_foodTarget?.Name}";
 
-    public void Enter(RuntimeContext ctx)
+    public void Enter(Entity agent)
     {
         _timer = 0f;
-        var agentPos = ctx.Agent.Transform.Position;
+        var agentPos = agent.Transform.Position;
         const float PICKUP_RADIUS = 100f;
 
         // Find nearest food that we have reserved
-        _foodTarget = ctx.World.EntityManager.QueryByComponent<TargetComponent>(agentPos, PICKUP_RADIUS)
+        _foodTarget = ServiceLocator.EntityManager.QueryByComponent<TargetComponent>(agentPos, PICKUP_RADIUS)
             .Where(e => e.GetComponent<TargetComponent>().Target == TargetType.Food)
-            .Where(e => ResourceReservationManager.Instance.IsReservedBy(e, ctx.Agent))
+            .Where(e => ResourceReservationManager.Instance.IsReservedBy(e, agent))
             .FirstOrDefault();
 
         if (_foodTarget == null)
@@ -41,7 +41,7 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
         GD.Print($"ConsumeFoodAction: Starting to eat {_foodTarget.Name} (restores {foodData.HungerRestoredOnConsumption} hunger)");
     }
 
-    public ActionStatus Update(RuntimeContext ctx, float dt)
+    public ActionStatus Update(Entity agent, float dt)
     {
         if (_failed || _foodTarget == null)
             return ActionStatus.Failed;
@@ -52,7 +52,7 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
         {
             // Get food data
             var foodData = _foodTarget.GetComponent<FoodData>();
-            var npcData = ctx.Agent.GetComponent<NPCData>();
+            var npcData = agent.GetComponent<NPCData>();
 
             // Restore hunger
             float hungerRestored = foodData.HungerRestoredOnConsumption;
@@ -61,10 +61,10 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
             GD.Print($"Consumed {_foodTarget.Name}! Hunger reduced by {hungerRestored}. Current hunger: {npcData.Hunger}/{npcData.MaxHunger}");
 
             // Release reservation before destroying
-            ResourceReservationManager.Instance.Release(_foodTarget, ctx.Agent);
+            ResourceReservationManager.Instance.Release(_foodTarget, agent);
 
             // Remove food from world
-            ctx.World.EntityManager.UnregisterEntity(_foodTarget);
+            ServiceLocator.EntityManager.UnregisterEntity(_foodTarget);
             _foodTarget.Destroy();
 
             return ActionStatus.Succeeded;
@@ -73,7 +73,7 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
         return ActionStatus.Running;
     }
 
-    public void Exit(RuntimeContext ctx, ActionExitReason reason)
+    public void Exit(Entity agent, ActionExitReason reason)
     {
         if (reason != ActionExitReason.Completed)
         {
@@ -81,7 +81,7 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
         }
     }
 
-    public bool StillValid(RuntimeContext ctx)
+    public bool StillValid(Entity agent)
     {
         if (_failed) return false;
         return _foodTarget != null && EntityManager.Instance.AllEntities.Contains(_foodTarget);

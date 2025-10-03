@@ -2,6 +2,7 @@ using Godot;
 using System;
 using System.Collections.Generic;
 using Game.Data.Components;
+using System.Linq;
 
 namespace Game.Data;
 
@@ -11,401 +12,392 @@ namespace Game.Data;
 /// </summary>
 public class Entity : IUpdatableEntity
 {
-    /// <summary>
-    /// Unique entity ID for component lookup and debugging.
-    /// </summary>
-    public Guid Id { get; } = Guid.NewGuid();
+	/// <summary>
+	/// Unique entity ID for component lookup and debugging.
+	/// </summary>
+	public Guid Id { get; } = Guid.NewGuid();
 
-    /// <summary>
-    /// Human-readable name of the entity, usually from its blueprint.
-    /// </summary>
-    public string Name { get; internal set; }
+	/// <summary>
+	/// Human-readable name of the entity, usually from its blueprint.
+	/// </summary>
+	public string Name { get; internal set; }
 
-    public EntityBlueprint Blueprint { get; internal set; }
+	public EntityBlueprint Blueprint { get; internal set; }
 
-    /// <summary>
-    /// Entity tags for categorization and filtering.
-    /// </summary>
-    public HashSet<Tag> Tags { get; } = [];
+	/// <summary>
+	/// Entity tags for categorization and filtering.
+	/// </summary>
+	public HashSet<Tag> Tags { get; } = [];
 
-    private TransformComponent2D _transform;
-    private VisualComponent _visual;
-    public TransformComponent2D Transform => _transform ??= GetComponent<TransformComponent2D>();
-    public VisualComponent Visual => _visual ??= GetComponent<VisualComponent>();
+	private TransformComponent2D _transform;
+	private VisualComponent _visual;
+	public TransformComponent2D Transform => _transform ??= GetComponent<TransformComponent2D>();
+	public VisualComponent Visual => _visual ??= GetComponent<VisualComponent>();
 
-    /// <summary>
-    /// Adds a tag to this entity.
-    /// </summary>
-    public bool AddTag(Tag tag) => Tags.Add(tag);
+	/// <summary>
+	/// Adds a tag to this entity.
+	/// </summary>
+	public bool AddTag(Tag tag) => Tags.Add(tag);
 
-    /// <summary>
-    /// Adds a tag from its string name (bridged via registry).
-    /// </summary>
-    public bool AddTag(string tagName) => Tags.Add(Tag.From(tagName));
+	/// <summary>
+	/// Adds a tag from its string name (bridged via registry).
+	/// </summary>
+	public bool AddTag(string tagName) => Tags.Add(Tag.From(tagName));
 
-    /// <summary>
-    /// Removes a tag from this entity.
-    /// </summary>
-    public bool RemoveTag(Tag tag) => Tags.Remove(tag);
+	/// <summary>
+	/// Removes a tag from this entity.
+	/// </summary>
+	public bool RemoveTag(Tag tag) => Tags.Remove(tag);
 
-    /// <summary>
-    /// Removes a tag by its string name.
-    /// </summary>
-    public bool RemoveTag(string tagName)
-    {
-        return Tag.TryFrom(tagName, out var tag) && Tags.Remove(tag);
-    }
+	/// <summary>
+	/// Removes a tag by its string name.
+	/// </summary>
+	public bool RemoveTag(string tagName)
+	{
+		return Tag.TryFrom(tagName, out var tag) && Tags.Remove(tag);
+	}
 
-    /// <summary>
-    /// Checks if this entity has the given tag.
-    /// </summary>
-    public bool HasTag(Tag tag) => Tags.Contains(tag);
+	/// <summary>
+	/// Checks if this entity has the given tag.
+	/// </summary>
+	public bool HasTag(Tag tag) => Tags.Contains(tag);
 
-    /// <summary>
-    /// Checks if this entity has the tag by name.
-    /// </summary>
-    public bool HasTag(string tagName)
-    {
-        return Tag.TryFrom(tagName, out var tag) && Tags.Contains(tag);
-    }
+	/// <summary>
+	/// Checks if this entity has the tag by name.
+	/// </summary>
+	public bool HasTag(string tagName)
+	{
+		return Tag.TryFrom(tagName, out var tag) && Tags.Contains(tag);
+	}
 
-    /// <summary>
-    /// Whether this entity should be updated.
-    /// </summary>
-    public bool IsActive { get; set; } = true;
+	/// <summary>
+	/// Whether this entity should be updated.
+	/// </summary>
+	public bool IsActive { get; set; } = true;
 
-    /// <summary>
-    /// Components attached to this entity.
-    /// </summary>
-    protected readonly Dictionary<Type, IComponent> _components = [];
+	/// <summary>
+	/// Components attached to this entity.
+	/// </summary>
+	protected readonly Dictionary<Type, IComponent> _components = [];
 
-    /// <summary>
-    /// Active components that should receive per-frame updates.
-    /// Stored in a list for tight iteration.
-    /// </summary>
-    protected readonly List<IActiveComponent> _activeComponents = [];
+	/// <summary>
+	/// Active components that should receive per-frame updates.
+	/// Stored in a list for tight iteration.
+	/// </summary>
+	protected readonly List<IActiveComponent> _activeComponents = [];
 
-    /// <summary>
-    /// True when this entity currently has at least one active component.
-    /// </summary>
-    public bool HasActiveComponents => _activeComponents.Count > 0;
+	/// <summary>
+	/// True when this entity currently has at least one active component.
+	/// </summary>
+	public bool HasActiveComponents => _activeComponents.Count > 0;
 
-    /// <summary>
-    /// Fired when the active component presence toggles between zero and non-zero.
-    /// Bool argument is the new state of <see cref="HasActiveComponents"/>.
-    /// </summary>
-    public event Action<Entity, bool> ActiveComponentsStateChanged;
+	/// <summary>
+	/// Fired when the active component presence toggles between zero and non-zero.
+	/// Bool argument is the new state of <see cref="HasActiveComponents"/>.
+	/// </summary>
+	public event Action<Entity, bool> ActiveComponentsStateChanged;
 
-    /// <summary>
-    /// Tracks whether this entity has completed initial attachment.
-    /// Controls whether newly added components should run OnPostAttached immediately.
-    /// </summary>
-    private bool _isInitialized;
+	/// <summary>
+	/// Tracks whether this entity has completed initial attachment.
+	/// Controls whether newly added components should run OnPostAttached immediately.
+	/// </summary>
+	private bool _isInitialized;
 
-    /// <summary>
-    /// Gets a component of the specified type, or null if not found.
-    /// </summary>
-    public T GetComponent<T>() where T : class, IComponent
-    {
-        if (_components.TryGetValue(typeof(T), out var component))
-        {
-            return (T)component;
-        }
+	/// <summary>
+	/// Gets a component of the specified type, or null if not found.
+	/// </summary>
+	public T GetComponent<T>() where T : class, IComponent
+	{
+		if (_components.TryGetValue(typeof(T), out var component))
+		{
+			return (T)component;
+		}
 
-        // Polymorphic fallback: search for first component that implements T
-        foreach (var c in _components.Values)
-        {
-            if (c is T match) return match;
-        }
+		// Polymorphic fallback: search for first component that implements T
+		foreach (var c in _components.Values)
+		{
+			if (c is T match) return match;
+		}
 
-        return null;
-    }
+		return null;
+	}
 
-    /// <summary>
-    /// Attempts to get a component of the specified type.
-    /// Returns true if found, false otherwise. The component is output via the out parameter.
-    /// </summary>
-    public bool TryGetComponent<T>(out T component) where T : class, IComponent
-    {
-        if (_components.TryGetValue(typeof(T), out var foundComponent))
-        {
-            component = (T)foundComponent;
-            return true;
-        }
+	/// <summary>
+	/// Attempts to get a component of the specified type.
+	/// Returns true if found, false otherwise. The component is output via the out parameter.
+	/// </summary>
+	public bool TryGetComponent<T>(out T component) where T : class, IComponent
+	{
+		if (_components.TryGetValue(typeof(T), out var foundComponent))
+		{
+			component = (T)foundComponent;
+			return true;
+		}
 
-        // Polymorphic fallback: search for first component that implements T
-        foreach (var c in _components.Values)
-        {
-            if (c is T match)
-            {
-                component = match;
-                return true;
-            }
-        }
+		// Polymorphic fallback: search for first component that implements T
+		foreach (var c in _components.Values)
+		{
+			if (c is T match)
+			{
+				component = match;
+				return true;
+			}
+		}
 
-        component = null;
-        return false;
-    }
+		component = null;
+		return false;
+	}
 
-    /// <summary>
-    /// Adds or replaces a component using two-phase attachment.
-    /// Uses the component's runtime type for storage to avoid interface-type overwrites.
-    /// </summary>
-    public void AddComponent<T>(T component) where T : IComponent
-    {
-        bool wasActive = HasActiveComponents;
-        var key = component.GetType();
-        if (_components.TryGetValue(key, out var existing))
-        {
-            // Invalidate caches before detaching
-            if (existing == _transform) _transform = null;
-            if (existing == _visual) _visual = null;
+	/// <summary>
+	/// Adds or replaces a component using two-phase attachment.
+	/// Uses the component's runtime type for storage to avoid interface-type overwrites.
+	/// </summary>
+	public void AddComponent<T>(T component) where T : IComponent
+	{
+		bool wasActive = HasActiveComponents;
+		var key = component.GetType();
+		if (_components.TryGetValue(key, out var existing))
+		{
+			// Invalidate caches before detaching
+			if (existing == _transform) _transform = null;
+			if (existing == _visual) _visual = null;
 
-            if (existing is IActiveComponent existingActive)
-            {
-                _activeComponents.Remove(existingActive);
-            }
-            existing.OnDetached();
-            existing.Entity = null;
-        }
+			if (existing is IActiveComponent existingActive)
+			{
+				_activeComponents.Remove(existingActive);
+			}
+			existing.OnDetached();
+			existing.Entity = null;
+		}
 
-        _components[key] = component;
-        component.Entity = this;
+		_components[key] = component;
+		component.Entity = this;
 
-        // Update caches for known component types
-        if (component is TransformComponent2D addedTransform)
-        {
-            _transform = addedTransform;
-        }
-        else if (component is VisualComponent addedVisual)
-        {
-            _visual = addedVisual;
-        }
+		// Update caches for known component types
+		if (component is TransformComponent2D addedTransform)
+		{
+			_transform = addedTransform;
+		}
+		else if (component is VisualComponent addedVisual)
+		{
+			_visual = addedVisual;
+		}
 
-        // Two-phase attachment for safe component initialization
-        component.OnPreAttached();
+		// Two-phase attachment for safe component initialization
+		component.OnPreAttached();
 
-        // If the entity is already initialized, complete attachment immediately
-        if (_isInitialized)
-        {
-            component.OnPostAttached();
-            if (component is IActiveComponent active)
-            {
-                _activeComponents.Add(active);
-            }
-            if (!wasActive && HasActiveComponents)
-            {
-                ActiveComponentsStateChanged?.Invoke(this, true);
-            }
-            else if (wasActive && !HasActiveComponents)
-            {
-                ActiveComponentsStateChanged?.Invoke(this, false);
-            }
-        }
-    }
+		// If the entity is already initialized, complete attachment immediately
+		if (_isInitialized)
+		{
+			component.OnPostAttached();
+			if (component is IActiveComponent active)
+			{
+				_activeComponents.Add(active);
+			}
+			if (!wasActive && HasActiveComponents)
+			{
+				ActiveComponentsStateChanged?.Invoke(this, true);
+			}
+			else if (wasActive && !HasActiveComponents)
+			{
+				ActiveComponentsStateChanged?.Invoke(this, false);
+			}
+		}
+	}
 
-    /// <summary>
-    /// Adds or replaces a component when only the interface type is available at callsite.
-    /// </summary>
-    public void AddComponent(IComponent component)
-    {
-        bool wasActive = HasActiveComponents;
-        var key = component.GetType();
-        if (_components.TryGetValue(key, out var existing))
-        {
-            // Invalidate caches before detaching
-            if (existing == _transform) _transform = null;
-            if (existing == _visual) _visual = null;
+	/// <summary>
+	/// Adds or replaces a component when only the interface type is available at callsite.
+	/// </summary>
+	public void AddComponent(IComponent component)
+	{
+		bool wasActive = HasActiveComponents;
+		var key = component.GetType();
+		if (_components.TryGetValue(key, out var existing))
+		{
+			// Invalidate caches before detaching
+			if (existing == _transform) _transform = null;
+			if (existing == _visual) _visual = null;
 
-            if (existing is IActiveComponent existingActive)
-            {
-                _activeComponents.Remove(existingActive);
-            }
-            existing.OnDetached();
-            existing.Entity = null;
-        }
+			if (existing is IActiveComponent existingActive)
+			{
+				_activeComponents.Remove(existingActive);
+			}
+			existing.OnDetached();
+			existing.Entity = null;
+		}
 
-        _components[key] = component;
-        component.Entity = this;
-        component.OnPreAttached();
+		_components[key] = component;
+		component.Entity = this;
+		component.OnPreAttached();
 
-        // Update caches for known component types
-        if (component is TransformComponent2D addedTransform)
-        {
-            _transform = addedTransform;
-        }
-        else if (component is VisualComponent addedVisual)
-        {
-            _visual = addedVisual;
-        }
+		// Update caches for known component types
+		if (component is TransformComponent2D addedTransform)
+		{
+			_transform = addedTransform;
+		}
+		else if (component is VisualComponent addedVisual)
+		{
+			_visual = addedVisual;
+		}
 
-        if (_isInitialized)
-        {
-            component.OnPostAttached();
-            if (component is IActiveComponent active)
-            {
-                _activeComponents.Add(active);
-            }
-            if (!wasActive && HasActiveComponents)
-            {
-                ActiveComponentsStateChanged?.Invoke(this, true);
-            }
-            else if (wasActive && !HasActiveComponents)
-            {
-                ActiveComponentsStateChanged?.Invoke(this, false);
-            }
-        }
-    }
+		if (_isInitialized)
+		{
+			component.OnPostAttached();
+			if (component is IActiveComponent active)
+			{
+				_activeComponents.Add(active);
+			}
+			if (!wasActive && HasActiveComponents)
+			{
+				ActiveComponentsStateChanged?.Invoke(this, true);
+			}
+			else if (wasActive && !HasActiveComponents)
+			{
+				ActiveComponentsStateChanged?.Invoke(this, false);
+			}
+		}
+	}
 
-    /// <summary>
-    /// Completes component attachment after all components are added.
-    /// Call this after adding all components to an entity.
-    /// </summary>
-    private void CompleteAttachment()
-    {
-        bool wasActive = HasActiveComponents;
-        // Create a snapshot to avoid modification-during-iteration issues
-        var componentsSnapshot = _components.Values.ToArray();
-        foreach (var component in componentsSnapshot)
-        {
-            // Skip if component was removed during initialization
-            if (component.Entity != this) continue;
+	/// <summary>
+	/// Completes component attachment after all components are added.
+	/// Call this after adding all components to an entity.
+	/// </summary>
+	private void CompleteAttachment()
+	{
+		bool wasActive = HasActiveComponents;
+		// Create a snapshot to avoid modification-during-iteration issues
+		var componentsSnapshot = _components.Values.ToArray();
+		foreach (var component in componentsSnapshot)
+		{
+			// Skip if component was removed during initialization
+			if (component.Entity != this) continue;
 
-            component.OnPostAttached();
-            if (component is IActiveComponent active && !_activeComponents.Contains(active))
-            {
-                _activeComponents.Add(active);
-            }
-        }
-        if (!wasActive && HasActiveComponents)
-        {
-            ActiveComponentsStateChanged?.Invoke(this, true);
-        }
-    }
+			component.OnPostAttached();
+			if (component is IActiveComponent active && !_activeComponents.Contains(active))
+			{
+				_activeComponents.Add(active);
+			}
+		}
+		if (!wasActive && HasActiveComponents)
+		{
+			ActiveComponentsStateChanged?.Invoke(this, true);
+		}
+	}
 
-    /// <summary>
-    /// Removes a component.
-    /// </summary>
-    public bool RemoveComponent<T>() where T : IComponent
-    {
-        bool wasActive = HasActiveComponents;
-        if (_components.TryGetValue(typeof(T), out var component))
-        {
-            // Invalidate caches for known component types BEFORE calling OnDetached
-            // to ensure consistency with AddComponent behavior
-            if (component == _transform) _transform = null;
-            if (component == _visual) _visual = null;
+	/// <summary>
+	/// Removes a component.
+	/// </summary>
+	public bool RemoveComponent<T>() where T : IComponent
+	{
+		bool wasActive = HasActiveComponents;
+		if (_components.TryGetValue(typeof(T), out var component))
+		{
+			// Invalidate caches for known component types BEFORE calling OnDetached
+			// to ensure consistency with AddComponent behavior
+			if (component == _transform) _transform = null;
+			if (component == _visual) _visual = null;
 
-            component.OnDetached();
-            component.Entity = null;
-            if (component is IActiveComponent active)
-            {
-                _activeComponents.Remove(active);
-            }
-            bool removed = _components.Remove(typeof(T));
-            if (wasActive && !HasActiveComponents)
-            {
-                ActiveComponentsStateChanged?.Invoke(this, false);
-            }
-            return removed;
-        }
-        return false;
-    }
+			component.OnDetached();
+			component.Entity = null;
+			if (component is IActiveComponent active)
+			{
+				_activeComponents.Remove(active);
+			}
+			bool removed = _components.Remove(typeof(T));
+			if (wasActive && !HasActiveComponents)
+			{
+				ActiveComponentsStateChanged?.Invoke(this, false);
+			}
+			return removed;
+		}
+		return false;
+	}
 
-    /// <summary>
-    /// Checks if entity has a specific component.
-    /// </summary>
-    public bool HasComponent<T>() where T : IComponent
-    {
-        if (_components.ContainsKey(typeof(T))) return true;
-        foreach (var c in _components.Values)
-        {
-            if (c is T) return true;
-        }
-        return false;
-    }
+	/// <summary>
+	/// Checks if entity has a specific component.
+	/// </summary>
+	public bool HasComponent<T>() where T : IComponent
+	{
+		if (_components.ContainsKey(typeof(T))) return true;
+		foreach (var c in _components.Values)
+		{
+			if (c is T) return true;
+		}
+		return false;
+	}
 
-    /// <summary>
-    /// Gets a component by a runtime type. Supports polymorphic matches.
-    /// </summary>
-    public IComponent GetComponent(Type componentType)
-    {
-        if (_components.TryGetValue(componentType, out var component))
-        {
-            return component;
-        }
-        foreach (var c in _components.Values)
-        {
-            if (componentType.IsAssignableFrom(c.GetType())) return c;
-        }
-        return null;
-    }
+	/// <summary>
+	/// Gets a component by a runtime type. Supports polymorphic matches.
+	/// </summary>
+	public IComponent GetComponent(Type componentType)
+	{
+		if (_components.TryGetValue(componentType, out var component))
+		{
+			return component;
+		}
+		foreach (var c in _components.Values)
+		{
+			if (componentType.IsAssignableFrom(c.GetType())) return c;
+		}
+		return null;
+	}
 
-    public void OnStart()
-    {
-        foreach (var component in _components.Values)
-        {
-            component.OnStart();
-        }
-    }
+	public void OnStart()
+	{
+		foreach (var component in _components.Values)
+		{
+			component.OnStart();
+		}
+	}
 
-    /// <summary>
-    /// Checks for a component by runtime type.
-    /// </summary>
-    public bool HasComponent(Type componentType) => GetComponent(componentType) != null;
+	/// <summary>
+	/// Checks for a component by runtime type.
+	/// </summary>
+	public bool HasComponent(Type componentType) => GetComponent(componentType) != null;
 
-    /// <summary>
-    /// Enumerates all components attached to this entity.
-    /// </summary>
-    public IEnumerable<IComponent> GetAllComponents() => _components.Values;
+	/// <summary>
+	/// Enumerates all components attached to this entity.
+	/// </summary>
+	public IEnumerable<IComponent> GetAllComponents() => _components.Values;
 
 
-    /// <summary>
-    /// Initializes the entity by completing the attachment of the components it was created with.
-    /// </summary>
-    public void Initialize()
-    {
-        _isInitialized = true;
-        CompleteAttachment();
-    }
+	/// <summary>
+	/// Initializes the entity by completing the attachment of the components it was created with.
+	/// </summary>
+	public void Initialize()
+	{
+		_isInitialized = true;
+		CompleteAttachment();
+	}
 
-    /// <summary>
-    /// Core update method - calls Update on all components.
-    /// </summary>
-    public virtual void Update(double delta)
-    {
-        if (!IsActive) return;
+	/// <summary>
+	/// Core update method - calls Update on all components.
+	/// </summary>
+	public virtual void Update(double delta)
+	{
+		if (!IsActive) return;
 
-        // Fast path: only iterate active components
-        for (int i = 0; i < _activeComponents.Count; i++)
-        {
-            _activeComponents[i].Update(delta);
-        }
-    }
+		// Fast path: only iterate active components
+		for (int i = 0; i < _activeComponents.Count; i++)
+		{
+			_activeComponents[i].Update(delta);
+		}
+	}
 
-    /// <summary>
-    /// Called when entity is destroyed.
-    /// </summary>
-    public virtual void Destroy()
-    {
-        foreach (var component in _components.Values)
-        {
-            component.OnDetached();
-        }
-        _components.Clear();
-        _activeComponents.Clear();
-        _transform = null;
-        _visual = null;
-    }
+	/// <summary>
+	/// Called when entity is destroyed.
+	/// </summary>
+	public virtual void Destroy()
+	{
+		foreach (var component in _components.Values)
+		{
+			component.OnDetached();
+		}
+		_components.Clear();
+		_activeComponents.Clear();
+		_transform = null;
+		_visual = null;
+	}
 
-    // Note: Factory method moved to EntityFactory. Keep class minimal.
+	// Note: Factory method moved to EntityFactory. Keep class minimal.
 }
-
-
-
-
-
-
-
-
-
