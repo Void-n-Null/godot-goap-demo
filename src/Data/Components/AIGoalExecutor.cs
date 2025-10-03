@@ -12,13 +12,10 @@ using Game.Utils;
 
 namespace Game.Data.Components;
 
-
-// Cache for expensive world state calculations
-
 /// <summary>
-/// Utility AI system that evaluates multiple goals and pursues the highest-utility one
+/// Executes plans to achieve goals. Fires events to notify selector of status changes.
 /// </summary>
-public class UtilityAIBehaviorV2 : IActiveComponent
+public class AIGoalExecutor : IActiveComponent
 {
 	public Entity Entity { get; set; }
 
@@ -26,9 +23,6 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 	private Task<Plan> _planningTask;
 	private bool _planningInProgress;
 	private IUtilityGoal _currentGoal;
-	
-	// Available goals to choose from
-	private List<IUtilityGoal> _availableGoals = new();
 
 	// Cached world state to avoid expensive rebuilding every frame
 	private WorldStateCache _worldStateCache;
@@ -43,10 +37,24 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 	private WorldStateData _worldData;
 	private float _lastWorldDataUpdate;
 	private const float WORLD_DATA_UPDATE_INTERVAL = 0.5f; // Update world data every 500ms
-	
-	// Goal evaluation
-	private float _lastGoalEvaluation;
-	private const float GOAL_EVALUATION_INTERVAL = 0.5f; // Re-evaluate goals every 500ms
+
+	// Events for the selector to listen to
+	public event Action<IUtilityGoal> OnCannotPlan; // "I couldn't even find a plan for this goal"
+	public event Action<IUtilityGoal> OnPlanExecutionFailed; // "I found a plan but it didn't work when I tried"
+	public event Action OnPlanSucceeded;
+	public event Action OnGoalSatisfied;
+	public event Action OnNeedNewGoal;
+
+	public void SetGoal(IUtilityGoal goal)
+	{
+		if (_currentGoal != goal)
+		{
+			_currentGoal = goal;
+			// Cancel current plan when goal changes
+			_currentPlan = null;
+			_worldStateCache = null;
+		}
+	}
 
 	public void Update(double delta)
 	{
@@ -76,22 +84,25 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 				}
 				else
 				{
-					GD.Print($"[{Entity.Name}] No plan for '{_currentGoal?.Name}'");
+					// Planning succeeded but no plan found - goal is impossible right now
+					GD.Print($"[{Entity.Name}] Cannot plan for '{_currentGoal?.Name}' - no valid path to goal");
+					var failedGoal = _currentGoal;
+					_currentGoal = null;
+					_currentPlan = null;
+					OnCannotPlan?.Invoke(failedGoal);
+					return;
 				}
 			}
 			else if (_planningTask.IsFaulted)
 			{
-				GD.Print($"[{Entity.Name}] Planning failed for '{_currentGoal?.Name}'");
+				GD.Print($"[{Entity.Name}] Planning error for '{_currentGoal?.Name}': {_planningTask.Exception?.Message}");
+				var failedGoal = _currentGoal;
+				_currentGoal = null;
 				_planningInProgress = false;
 				_planningTask = null;
+				OnCannotPlan?.Invoke(failedGoal);
+				return;
 			}
-		}
-
-		// Evaluate goals periodically
-		if (currentTime - _lastGoalEvaluation > GOAL_EVALUATION_INTERVAL)
-		{
-			_lastGoalEvaluation = currentTime;
-			EvaluateAndSelectGoal();
 		}
 
 		// Check if current goal is satisfied
@@ -100,7 +111,15 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 			GD.Print($"[{Entity.Name}] Goal '{_currentGoal.Name}' satisfied!");
 			_currentPlan = null;
 			_currentGoal = null;
-			EvaluateAndSelectGoal(); // Pick new goal immediately
+			OnGoalSatisfied?.Invoke();
+			return;
+		}
+
+		// Request new goal if we don't have one
+		if (_currentGoal == null)
+		{
+			OnNeedNewGoal?.Invoke();
+			return;
 		}
 
 		// Replan if no plan and have a goal
@@ -147,59 +166,27 @@ public class UtilityAIBehaviorV2 : IActiveComponent
 				if (_currentPlan.Succeeded)
 				{
 					// Plan succeeded, goal should be satisfied next eval
+					OnPlanSucceeded?.Invoke();
 				}
 				else
 				{
-					GD.Print($"[{Entity.Name}] Plan failed for '{_currentGoal?.Name}', replanning...");
+					GD.Print($"[{Entity.Name}] Plan execution failed for '{_currentGoal?.Name}'");
+					var failedGoal = _currentGoal;
 					_currentPlan = null;
 					_worldStateCache = null;
 					_lastWorldDataUpdate = -WORLD_DATA_UPDATE_INTERVAL;
 					UpdateWorldData();
+					OnPlanExecutionFailed?.Invoke(failedGoal);
 				}
 			}
 		}
 	}
 
-	private void EvaluateAndSelectGoal()
-	{
-		if (_availableGoals.Count == 0) return;
-
-		// Calculate utility for each goal
-		var goalUtilities = _availableGoals
-			.Select(g => new { Goal = g, Utility = g.CalculateUtility(Entity) })
-			.OrderByDescending(x => x.Utility)
-			.ToList();
-
-		var bestGoal = goalUtilities.First();
-
-		// Only change goals if utility difference is significant (avoid thrashing)
-		if (_currentGoal != bestGoal.Goal && bestGoal.Utility > 0.05f)
-		{
-			var oldGoal = _currentGoal?.Name ?? "None";
-			_currentGoal = bestGoal.Goal;
-			GD.Print($"[{Entity.Name}] Goal switch: '{oldGoal}' → '{_currentGoal.Name}' (utility: {bestGoal.Utility:F2})");
-			
-			// Cancel current plan when goal changes
-			_currentPlan = null;
-			_worldStateCache = null;
-		}
-	}
-
 	public void OnStart()
 	{
-		// Register available goals
-		_availableGoals.Add(new EatFoodGoal());
-		_availableGoals.Add(new StayWarmGoal());
-		_availableGoals.Add(new IdleGoal());
-
-		GD.Print($"[{Entity.Name}] UtilityAI started with {_availableGoals.Count} goals");
-
 		// Seed world data immediately
 		_lastWorldDataUpdate = -WORLD_DATA_UPDATE_INTERVAL;
 		UpdateWorldDataIfNeeded(Time.GetTicksMsec() / 1000.0f);
-		
-		// Evaluate goals immediately
-		EvaluateAndSelectGoal();
 	}
 
 	public void OnPostAttached()

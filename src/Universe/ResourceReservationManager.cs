@@ -18,6 +18,9 @@ public class ResourceReservationManager
     
     // Maps agent ID to all resources they've reserved (for cleanup)
     private Dictionary<Guid, HashSet<Guid>> _agentReservations = new();
+    
+    // ✅ FIXED: Thread safety for parallel GOAP planning
+    private readonly object _lock = new object();
 
     /// <summary>
     /// Try to reserve a resource for an agent
@@ -27,32 +30,35 @@ public class ResourceReservationManager
         if (resource == null || agent == null)
             return false;
 
-        var resourceId = resource.Id;
-        var agentId = agent.Id;
-
-        // Already reserved by someone else
-        if (_reservations.ContainsKey(resourceId) && _reservations[resourceId] != agentId)
+        lock (_lock)
         {
-            return false;
-        }
+            var resourceId = resource.Id;
+            var agentId = agent.Id;
 
-        // Already reserved by this agent
-        if (_reservations.ContainsKey(resourceId) && _reservations[resourceId] == agentId)
-        {
+            // Already reserved by someone else
+            if (_reservations.ContainsKey(resourceId) && _reservations[resourceId] != agentId)
+            {
+                return false;
+            }
+
+            // Already reserved by this agent
+            if (_reservations.ContainsKey(resourceId) && _reservations[resourceId] == agentId)
+            {
+                return true;
+            }
+
+            // Reserve it
+            _reservations[resourceId] = agentId;
+            
+            if (!_agentReservations.ContainsKey(agentId))
+            {
+                _agentReservations[agentId] = new HashSet<Guid>();
+            }
+            _agentReservations[agentId].Add(resourceId);
+
+            GD.Print($"[Reservation] {agent.Name} reserved {resource.Name} ({resourceId})");
             return true;
         }
-
-        // Reserve it
-        _reservations[resourceId] = agentId;
-        
-        if (!_agentReservations.ContainsKey(agentId))
-        {
-            _agentReservations[agentId] = new HashSet<Guid>();
-        }
-        _agentReservations[agentId].Add(resourceId);
-
-        GD.Print($"[Reservation] {agent.Name} reserved {resource.Name} ({resourceId})");
-        return true;
     }
 
     /// <summary>
@@ -63,14 +69,17 @@ public class ResourceReservationManager
         if (resource == null || agent == null)
             return;
 
-        var resourceId = resource.Id;
-        var agentId = agent.Id;
-
-        if (_reservations.TryGetValue(resourceId, out var reservedBy) && reservedBy == agentId)
+        lock (_lock)
         {
-            _reservations.Remove(resourceId);
-            _agentReservations[agentId]?.Remove(resourceId);
-            GD.Print($"[Reservation] {agent.Name} released {resource.Name} ({resourceId})");
+            var resourceId = resource.Id;
+            var agentId = agent.Id;
+
+            if (_reservations.TryGetValue(resourceId, out var reservedBy) && reservedBy == agentId)
+            {
+                _reservations.Remove(resourceId);
+                _agentReservations[agentId]?.Remove(resourceId);
+                GD.Print($"[Reservation] {agent.Name} released {resource.Name} ({resourceId})");
+            }
         }
     }
 
@@ -82,16 +91,19 @@ public class ResourceReservationManager
         if (agent == null)
             return;
 
-        var agentId = agent.Id;
-
-        if (_agentReservations.TryGetValue(agentId, out var reservedResources))
+        lock (_lock)
         {
-            foreach (var resourceId in reservedResources)
+            var agentId = agent.Id;
+
+            if (_agentReservations.TryGetValue(agentId, out var reservedResources))
             {
-                _reservations.Remove(resourceId);
+                foreach (var resourceId in reservedResources)
+                {
+                    _reservations.Remove(resourceId);
+                }
+                reservedResources.Clear();
+                GD.Print($"[Reservation] {agent.Name} released all reservations");
             }
-            reservedResources.Clear();
-            GD.Print($"[Reservation] {agent.Name} released all reservations");
         }
     }
 
@@ -100,7 +112,13 @@ public class ResourceReservationManager
     /// </summary>
     public bool IsReserved(Entity resource)
     {
-        return resource != null && _reservations.ContainsKey(resource.Id);
+        if (resource == null)
+            return false;
+            
+        lock (_lock)
+        {
+            return _reservations.ContainsKey(resource.Id);
+        }
     }
 
     /// <summary>
@@ -111,7 +129,10 @@ public class ResourceReservationManager
         if (resource == null || agent == null)
             return false;
 
-        return _reservations.TryGetValue(resource.Id, out var reservedBy) && reservedBy == agent.Id;
+        lock (_lock)
+        {
+            return _reservations.TryGetValue(resource.Id, out var reservedBy) && reservedBy == agent.Id;
+        }
     }
 
     /// <summary>
@@ -122,17 +143,20 @@ public class ResourceReservationManager
         if (resource == null)
             return false;
 
-        var resourceId = resource.Id;
-        
-        // Not reserved = available
-        if (!_reservations.ContainsKey(resourceId))
-            return true;
+        lock (_lock)
+        {
+            var resourceId = resource.Id;
+            
+            // Not reserved = available
+            if (!_reservations.ContainsKey(resourceId))
+                return true;
 
-        // Reserved by this agent = available
-        if (agent != null && _reservations[resourceId] == agent.Id)
-            return true;
+            // Reserved by this agent = available
+            if (agent != null && _reservations[resourceId] == agent.Id)
+                return true;
 
-        // Reserved by someone else = not available
-        return false;
+            // Reserved by someone else = not available
+            return false;
+        }
     }
 }

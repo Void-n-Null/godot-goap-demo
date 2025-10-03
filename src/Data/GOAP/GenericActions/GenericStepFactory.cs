@@ -28,10 +28,10 @@ public class StepConfig
 /// Unified step factory that creates parameterized steps instead of hardcoded ones.
 /// Replaces all the individual XxxStepFactory classes.
 /// </summary>
-[StepFactory]
+
 public class GenericStepFactory : IStepFactory
 {
-    private readonly List<StepConfig> _stepConfigs = new();
+    private readonly List<StepConfig> _stepConfigs = [];
 
     public GenericStepFactory()
     {
@@ -95,10 +95,10 @@ public class GenericStepFactory : IStepFactory
                 {
                     Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == type,
                     SearchRadius = 100f,
-                    // No reservation needed - pickups are instant (0.5s)
-                    RequireUnreserved = false,
-                    RequireReservation = false,
-                    ShouldReserve = false
+                    // ✅ FIXED: Reserve on pickup (works with or without prior move step)
+                    RequireUnreserved = false,  // May already be reserved by us from move
+                    RequireReservation = false, // Don't require pre-existing reservation
+                    ShouldReserve = true        // Reserve it ourselves when we start
                 },
                 interactionTime: 0.5f,
                 InteractionEffectConfig.PickUp(type),
@@ -151,7 +151,9 @@ public class GenericStepFactory : IStepFactory
                 {
                     Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Tree,
                     SearchRadius = 64f,
-                    RequireReservation = true
+                    // ✅ Take ownership of reservation from GoTo_Tree to prevent leaks
+                    RequireReservation = false,
+                    ShouldReserve = true  // Re-reserve (idempotent if already reserved by us)
                 },
                 interactionTime: 3.0f,
                 InteractionEffectConfig.Kill(),
@@ -209,7 +211,9 @@ public class GenericStepFactory : IStepFactory
                 {
                     Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Food,
                     SearchRadius = 100f,
-                    RequireReservation = true
+                    // ✅ Take ownership of reservation from GoTo_Food to prevent leaks
+                    RequireReservation = false,
+                    ShouldReserve = true  // Re-reserve (idempotent if already reserved by us)
                 },
                 interactionTime: 2.0f,
                 InteractionEffectConfig.ConsumeFood(),

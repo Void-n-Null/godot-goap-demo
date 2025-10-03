@@ -65,6 +65,13 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
             return;
         }
 
+        // ✅ FIXED: Reserve if needed (prevents race conditions)
+        if (_finderConfig.ShouldReserve && !ResourceReservationManager.Instance.TryReserve(_targetEntity, agent))
+        {
+            Fail($"Failed to reserve target for {_actionName}");
+            return;
+        }
+
         GD.Print($"[{agent.Name}] {_actionName}: Starting interaction with {_targetEntity.Name} (duration: {_interactionTime}s)");
     }
 
@@ -108,6 +115,15 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
         if (reason != ActionExitReason.Completed)
         {
             GD.Print($"{_actionName} canceled or failed before completion");
+            
+            // ✅ FIXED: Only release if WE created the reservation (ownership model)
+            // If we just verified someone else's reservation (RequireReservation=true),
+            // they are responsible for cleanup
+            if (_targetEntity != null && _finderConfig.ShouldReserve)
+            {
+                ResourceReservationManager.Instance.Release(_targetEntity, agent);
+                GD.Print($"[Reservation Cleanup] Released {_targetEntity.Name} due to {reason}");
+            }
         }
     }
 

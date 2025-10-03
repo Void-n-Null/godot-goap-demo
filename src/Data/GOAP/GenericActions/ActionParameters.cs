@@ -130,45 +130,6 @@ public class InteractionEffectConfig
         };
     }
 
-    /// <summary>
-    /// Build a campfire at agent's current position (consumes sticks from inventory)
-    /// </summary>
-    public static InteractionEffectConfig BuildCampfire(int sticksRequired = 16)
-    {
-        return new InteractionEffectConfig
-        {
-            OnComplete = (agent, target) =>
-            {
-                // This is a special case - we're not interacting with an existing entity
-                // We're creating a new campfire at the agent's location
-                if (agent.TryGetComponent<NPCData>(out var npcData) &&
-                    agent.TryGetComponent<TransformComponent2D>(out var transform))
-                {
-                    // Deduct sticks from inventory
-                    int currentSticks = npcData.Resources.GetValueOrDefault(TargetType.Stick, 0);
-                    if (currentSticks >= sticksRequired)
-                    {
-                        npcData.Resources[TargetType.Stick] = currentSticks - sticksRequired;
-
-                        // Spawn campfire at agent's position
-                        var campfire = Universe.SpawnEntity.Now(
-                            Game.Data.Blueprints.Objects.Campfire.SimpleCampfire,
-                            transform.Position
-                        );
-
-                        GD.Print($"Built campfire at {transform.Position}! Sticks remaining: {npcData.Resources[TargetType.Stick]}");
-                    }
-                    else
-                    {
-                        GD.PushError($"Not enough sticks to build campfire! Need {sticksRequired}, have {currentSticks}");
-                    }
-                }
-            },
-            DestroyTargetOnComplete = false, // Not destroying anything
-            ReleaseReservationOnComplete = false // No reservation needed
-        };
-    }
-
     public static InteractionEffectConfig Arbitrary(Action<Entity, Entity> onComplete)
     {
         return new InteractionEffectConfig
