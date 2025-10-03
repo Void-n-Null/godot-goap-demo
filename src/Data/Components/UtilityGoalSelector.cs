@@ -11,6 +11,9 @@ namespace Game.Data.Components;
 /// <summary>
 /// Evaluates multiple goals and assigns the highest-utility one to the executor.
 /// Tracks failed goals to avoid repeatedly assigning impossible goals.
+/// 
+/// EVENT-DRIVEN: Only assigns new goals in response to executor events.
+/// Never interrupts active plans with periodic re-evaluation.
 /// </summary>
 public class UtilityGoalSelector : IActiveComponent
 {
@@ -29,25 +32,12 @@ public class UtilityGoalSelector : IActiveComponent
 	private Dictionary<IUtilityGoal, float> _goalExecutionFailureCooldowns = new();
 	private const float EXECUTION_FAILURE_COOLDOWN = 2.0f; // Small cooldown for execution failures
 
-	// Goal evaluation
-	private float _lastGoalEvaluation;
-	private const float GOAL_EVALUATION_INTERVAL = 0.5f; // Re-evaluate goals every 500ms
-
 	private AIGoalExecutor _executor;
 
 	public void Update(double delta)
 	{
-		// Get executor reference if not cached
-		if (_executor == null && !Entity.TryGetComponent(out _executor)) return;
-
-		float currentTime = Time.GetTicksMsec() / 1000.0f;
-
-		// Evaluate goals periodically
-		if (currentTime - _lastGoalEvaluation > GOAL_EVALUATION_INTERVAL)
-		{
-			_lastGoalEvaluation = currentTime;
-			EvaluateAndSelectGoal();
-		}
+		// Selector is event-driven - only reacts to executor events
+		// No periodic evaluation to avoid interrupting active plans
 	}
 
 	private void OnExecutorCannotPlan(IUtilityGoal goal)
@@ -74,7 +64,7 @@ public class UtilityGoalSelector : IActiveComponent
 
 	private void OnExecutorGoalSatisfied()
 	{
-		GD.Print($"[{Entity.Name}] Executor reported goal satisfied, picking new goal...");
+
 		// Clear cooldowns for the satisfied goal since it worked
 		if (_currentGoal != null)
 		{
@@ -122,6 +112,7 @@ public class UtilityGoalSelector : IActiveComponent
 
 	private void EvaluateAndSelectGoal()
 	{
+		// Only called in response to executor events - never interrupts active plans
 		if (_availableGoals.Count == 0) return;
 		if (_executor == null) return;
 
@@ -146,7 +137,6 @@ public class UtilityGoalSelector : IActiveComponent
 		{
 			var oldGoal = _currentGoal?.Name ?? "None";
 			_currentGoal = bestGoal.Goal;
-			GD.Print($"[{Entity.Name}] Goal switch: '{oldGoal}' → '{_currentGoal.Name}' (utility: {bestGoal.Utility:F2})");
 			
 			// Bestow the new goal upon the executor
 			_executor.SetGoal(_currentGoal);

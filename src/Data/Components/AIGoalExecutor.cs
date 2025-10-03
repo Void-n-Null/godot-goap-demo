@@ -33,10 +33,10 @@ public class AIGoalExecutor : IActiveComponent
 	private float _lastPlanningTime;
 	private const float MIN_PLANNING_INTERVAL = 1.0f; // Don't plan more than once per second
 
-	// Pre-computed world data for efficient state building
-	private WorldStateData _worldData;
-	private float _lastWorldDataUpdate;
-	private const float WORLD_DATA_UPDATE_INTERVAL = 0.5f; // Update world data every 500ms
+	// Performance optimizations: cache enum values and string keys to avoid allocations
+	private static readonly TargetType[] _cachedTargetTypes = (TargetType[])Enum.GetValues(typeof(TargetType));
+	private static readonly float _nearRadiusSquared = 64f * 64f; // Cache squared distance for faster proximity checks
+	private string _cachedAgentId; // Cache agent ID string to avoid repeated ToString()
 
 	// Events for the selector to listen to
 	public event Action<IUtilityGoal> OnCannotPlan; // "I couldn't even find a plan for this goal"
@@ -60,9 +60,6 @@ public class AIGoalExecutor : IActiveComponent
 	{
 		// Use cached state if available and not expired, otherwise rebuild
 		float currentTime = Time.GetTicksMsec() / 1000.0f;
-
-		// Ensure world data is kept fresh
-		UpdateWorldDataIfNeeded(currentTime);
 
 		// Build current state (pure facts only, no Agent/World)
 		var currentState = (_worldStateCache != null && !_worldStateCache.IsExpired(currentTime, STATE_CACHE_DURATION))
@@ -108,7 +105,6 @@ public class AIGoalExecutor : IActiveComponent
 		// Check if current goal is satisfied
 		if (_currentGoal != null && _currentGoal.IsSatisfied(Entity))
 		{
-			GD.Print($"[{Entity.Name}] Goal '{_currentGoal.Name}' satisfied!");
 			_currentPlan = null;
 			_currentGoal = null;
 			OnGoalSatisfied?.Invoke();
@@ -174,8 +170,7 @@ public class AIGoalExecutor : IActiveComponent
 					var failedGoal = _currentGoal;
 					_currentPlan = null;
 					_worldStateCache = null;
-					_lastWorldDataUpdate = -WORLD_DATA_UPDATE_INTERVAL;
-					UpdateWorldData();
+					GlobalWorldStateManager.Instance.ForceRefresh();
 					OnPlanExecutionFailed?.Invoke(failedGoal);
 				}
 			}
@@ -184,9 +179,8 @@ public class AIGoalExecutor : IActiveComponent
 
 	public void OnStart()
 	{
-		// Seed world data immediately
-		_lastWorldDataUpdate = -WORLD_DATA_UPDATE_INTERVAL;
-		UpdateWorldDataIfNeeded(Time.GetTicksMsec() / 1000.0f);
+		// Cache agent ID string once to avoid repeated ToString() calls
+		_cachedAgentId = Entity.Id.ToString();
 	}
 
 	public void OnPostAttached()
@@ -232,15 +226,20 @@ public class AIGoalExecutor : IActiveComponent
 		{
 			facts[FactKeys.Position] = transform.Position;
 		}
-		facts[FactKeys.AgentId] = Entity.Id.ToString();
+		facts[FactKeys.AgentId] = _cachedAgentId;
 
-		// Use pre-computed world data
-		if (_worldData != null && Entity.TryGetComponent<NPCData>(out var npcData))
+		// Get SHARED world data (computed once globally, not per-agent!)
+		var worldData = GlobalWorldStateManager.Instance.GetWorldState();
+		
+		if (Entity.TryGetComponent<NPCData>(out var npcData))
 		{
-			// World facts for each resource type
-			foreach (TargetType rt in Enum.GetValues<TargetType>())
+			// World facts for each resource type - use cached enum array
+			for (int i = 0; i < _cachedTargetTypes.Length; i++)
 			{
-				int worldCount = _worldData.EntityCounts.GetValueOrDefault(rt.ToString(), 0);
+				var rt = _cachedTargetTypes[i];
+				string resourceName = rt.ToString(); // Still need ToString for lookup, but only once per type
+				
+				int worldCount = worldData.EntityCounts.GetValueOrDefault(resourceName, 0);
 				int agentCount = npcData.Resources.GetValueOrDefault(rt, 0);
 				
 				facts[FactKeys.WorldCount(rt)] = worldCount;
@@ -253,18 +252,50 @@ public class AIGoalExecutor : IActiveComponent
 			facts["Hunger"] = npcData.Hunger;
 		}
 
-		// Compute proximity facts
-		if (Entity.TryGetComponent<TransformComponent2D>(out var agentTransform) && _worldData != null)
+		// Compute proximity facts (agent-specific based on their position)
+		// OPTIMIZED: Use squared distance and avoid LINQ
+		if (Entity.TryGetComponent<TransformComponent2D>(out var agentTransform))
 		{
-			const float nearRadius = 64f;
-
-			foreach (TargetType targetType in Enum.GetValues<TargetType>())
+			var agentPos = agentTransform.Position;
+			
+			// Pre-allocate array to track which target types have nearby entities
+			Span<bool> hasNearby = stackalloc bool[_cachedTargetTypes.Length];
+			
+			// Single pass through all entity positions
+			foreach (var kvp in worldData.EntityPositions)
 			{
-				var nearbyCount = _worldData.EntityPositions
-					.Where(kvp => kvp.Key.StartsWith($"{targetType}_"))
-					.Count(kvp => agentTransform.Position.DistanceTo(kvp.Value) <= nearRadius);
+				// Fast squared distance check first (avoids sqrt)
+				var dx = kvp.Value.X - agentPos.X;
+				var dy = kvp.Value.Y - agentPos.Y;
+				var distSquared = dx * dx + dy * dy;
 				
-				facts[FactKeys.NearTarget(targetType)] = nearbyCount > 0;
+				if (distSquared <= _nearRadiusSquared)
+				{
+					// Entity is nearby - determine which type it is
+					// Key format is "{TargetType}_{index}"
+					var key = kvp.Key;
+					int underscoreIndex = key.IndexOf('_');
+					if (underscoreIndex > 0)
+					{
+						var typePrefix = key.Substring(0, underscoreIndex);
+						
+						// Match against our cached types
+						for (int i = 0; i < _cachedTargetTypes.Length; i++)
+						{
+							if (typePrefix == _cachedTargetTypes[i].ToString())
+							{
+								hasNearby[i] = true;
+								break;
+							}
+						}
+					}
+				}
+			}
+			
+			// Set facts based on proximity results
+			for (int i = 0; i < _cachedTargetTypes.Length; i++)
+			{
+				facts[FactKeys.NearTarget(_cachedTargetTypes[i])] = hasNearby[i];
 			}
 		}
 
@@ -273,67 +304,5 @@ public class AIGoalExecutor : IActiveComponent
 		_worldStateCache = new WorldStateCache(facts, cacheTime);
 
 		return new State(facts);
-	}
-
-	private void UpdateWorldDataIfNeeded(float currentTime)
-	{
-		if (_worldData == null || currentTime - _lastWorldDataUpdate > WORLD_DATA_UPDATE_INTERVAL)
-		{
-			UpdateWorldData();
-			_lastWorldDataUpdate = currentTime;
-		}
-	}
-
-	private void UpdateWorldData()
-	{
-		if (_worldData == null)
-		{
-			_worldData = new WorldStateData();
-		}
-
-		_worldData.EntityCounts.Clear();
-		_worldData.AvailabilityFlags.Clear();
-		_worldData.EntityPositions.Clear();
-
-		var allEntities = EntityManager.Instance.AllEntities.OfType<Entity>().ToList();
-
-		// Count entities by type
-		if (Entity.TryGetComponent<NPCData>(out var npcData))
-		{
-			foreach (TargetType rt in Enum.GetValues<TargetType>())
-			{
-				var targetName = rt.ToString();
-				var count = allEntities.Count(e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == rt);
-				_worldData.EntityCounts[targetName] = count;
-				_worldData.AvailabilityFlags[$"Available_{targetName}"] = count > 0;
-			}
-		}
-
-		// Count trees - ONLY ALIVE ones
-		var treeCount = allEntities.Count(e => e.Tags.Contains(Tags.Tree) 
-			&& e.TryGetComponent<HealthComponent>(out var health) 
-			&& health.IsAlive);
-		_worldData.EntityCounts["Tree"] = treeCount;
-		_worldData.AvailabilityFlags["TreeAvailable"] = treeCount > 0;
-
-		// Cache positions for proximity - ONLY ALIVE entities
-		for (int i = 0; i < allEntities.Count; i++)
-		{
-			var entity = allEntities[i];
-			if (entity.TryGetComponent<TransformComponent2D>(out var transform))
-			{
-				if (entity.Tags.Contains(Tags.Tree))
-				{
-					if (entity.TryGetComponent<HealthComponent>(out var health) && health.IsAlive)
-					{
-						_worldData.EntityPositions[$"Tree_{i}"] = transform.Position;
-					}
-				}
-				else if (entity.TryGetComponent<TargetComponent>(out var tc))
-				{
-					_worldData.EntityPositions[$"{tc.Target}_{i}"] = transform.Position;
-				}
-			}
-		}
 	}
 }

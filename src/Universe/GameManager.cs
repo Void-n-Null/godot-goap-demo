@@ -112,15 +112,15 @@ public partial class GameManager : SingletonNode<GameManager>
 		// 	SpawnEntity.Now(Furniture.Bed, Utils.Random.NextVector2(-10000, 10000));
 
 		// Spawn trees for wood gathering
-		for (int i = 0; i < 100; i++)
+		for (int i = 0; i < 500; i++)
 			SpawnEntity.Now(Nature.SimpleTree, Utils.Random.NextVector2(-15000, 15000));
 		
 		// Spawn food for eating
-		for (int i = 0; i < 150; i++)
+		for (int i = 0; i < 500; i++)
 			SpawnEntity.Now(Food.RawBeef, Utils.Random.NextVector2(-15000, 15000));
 		
 		// Spawn NPCs with randomized hunger
-		for (int i = 0; i < 5; i++)
+		for (int i = 0; i < 200; i++)
 			SpawnEntity.Now(NPC.Intelligent, Utils.Random.NextVector2(-3000, 3000));
 		// for (int i = 0; i < 15000; i++)
 		// 	SpawnEntity.Now(Items.Stick, Utils.Random.NextVector2(-10000, 10000));
