@@ -20,6 +20,10 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	public PackedScene DefaultViewScene { get; set; }
 	[Export]
 	public bool DebugDrawSpatialIndex { get; set; } = false;
+	[Export]
+	public int MaxEntitiesPerFrame { get; set; } = 1000; // Max entities to update per frame
+	[Export]
+	public int MaxFramesPerTick { get; set; } = 10; // Max frames to spread a tick across
 	/// <summary>
 	/// Maximum entities to prevent memory issues.
 	/// </summary>
@@ -40,6 +44,25 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	private readonly Queue<Action> _pendingEntityListMutations = new();
 	private readonly Dictionary<Guid, Entity> _entityById = new();
 
+	// Tick slicing state
+	private sealed class TickWorkItem
+	{
+		public double Delta { get; }
+		public int StartIndex { get; set; }
+		public int TotalEntities { get; }
+
+		public TickWorkItem(double delta, int totalEntities)
+		{
+			Delta = delta;
+			TotalEntities = totalEntities;
+			StartIndex = 0;
+		}
+
+		public bool IsComplete => StartIndex >= TotalEntities;
+	}
+
+	private TickWorkItem _currentTickWork;
+
 	public SpatialIndex SpatialPartition
 	{
 		get
@@ -50,8 +73,6 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	}
 
 	public IReadOnlyList<IUpdatableEntity> AllEntities => _entities.AsReadOnly();
-
-	private int _currentSliceIndex;
 
 	// Intentionally no view mappings. Views are owned by VisualComponent.
 
@@ -90,43 +111,77 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	}
 
 	/// <summary>
-	/// Ultra-fast bulk update - direct array iteration.
-	/// No dictionary lookups, no event delegation overhead.
+	/// Queues up a new tick for processing. The actual entity updates are spread across frames in _Process.
+	/// Death spiral protection: if we're still processing the previous tick, skip this one.
 	/// </summary>
 	private void OnTick(double delta)
 	{
+		// Death spiral protection: if still processing previous tick, skip this one
+		if (_currentTickWork != null && !_currentTickWork.IsComplete)
+		{
+			GD.PushWarning($"EntityManager: Skipping tick - still processing previous tick ({_currentTickWork.StartIndex}/{_currentTickWork.TotalEntities} entities updated)");
+			return;
+		}
+
+		// Determine which list to process
+		var entitiesToUpdate = _activeEntities.Count > 0 ? _activeEntities : _entities;
+
+		// Queue up new tick work
+		_currentTickWork = new TickWorkItem(delta, entitiesToUpdate.Count);
+	}
+
+	/// <summary>
+	/// Processes entity updates in slices across frames for better performance distribution.
+	/// </summary>
+	public override void _Process(double delta)
+	{
+		base._Process(delta);
+
+		// Process a slice of the current tick if there's work to do
+		if (_currentTickWork != null && !_currentTickWork.IsComplete)
+		{
+			ProcessTickSlice();
+		}
+	}
+
+	/// <summary>
+	/// Processes a slice of entities for the current tick.
+	/// </summary>
+	private void ProcessTickSlice()
+	{
+		if (_currentTickWork == null || _currentTickWork.IsComplete)
+		{
+			return;
+		}
+
 		EnsureSpatialIndex();
 		_isProcessingTick = true;
 		try
 		{
-		var gameManager = GameManager.Instance;
-		int totalSlices = gameManager?.CurrentTickSliceCount ?? 1;
-		int sliceIndex = gameManager?.CurrentTickSliceIndex ?? 0;
-		
-		// CRITICAL: Only update entities on the FIRST slice of a tick
-		// Slicing is for spreading work across frames, NOT for calling entities multiple times
-		if (sliceIndex != 0)
-		{
-			return; // Skip subsequent slices - entities already updated this tick
-		}
-		
-		// On slice 0, update ALL entities (ignore slicing since we're only running once per tick)
-		if (_activeEntities.Count > 0)
-		{
-			for (int i = 0; i < _activeEntities.Count; i++)
+			var entitiesToUpdate = _activeEntities.Count > 0 ? _activeEntities : _entities;
+
+			// Calculate how many entities to process this frame
+			int remainingEntities = _currentTickWork.TotalEntities - _currentTickWork.StartIndex;
+			int entitiesToProcess = Math.Min(MaxEntitiesPerFrame, remainingEntities);
+			int endIndex = _currentTickWork.StartIndex + entitiesToProcess;
+
+			// Process the slice
+			for (int i = _currentTickWork.StartIndex; i < endIndex; i++)
 			{
-				_activeEntities[i].Update(delta);
+				if (i < entitiesToUpdate.Count) // Safety check
+				{
+					entitiesToUpdate[i].Update(_currentTickWork.Delta);
+				}
 			}
-		}
-		else
-		{
-			for (int i = 0; i < _entities.Count; i++)
+
+			// Update progress
+			_currentTickWork.StartIndex = endIndex;
+
+			// If complete, clear the work
+			if (_currentTickWork.IsComplete)
 			{
-				_entities[i].Update(delta);
+				_currentTickWork = null;
 			}
-		}
-		
-		_currentSliceIndex = 0;
 		}
 		finally
 		{
