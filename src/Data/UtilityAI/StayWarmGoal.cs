@@ -20,13 +20,15 @@ public class StayWarmGoal : IUtilityGoal
         if (agent.TryGetComponent<TransformComponent2D>(out var transform))
         {
             const float WARMTH_RADIUS = 150f;
-            var nearbyCampfires = Universe.EntityManager.Instance
-                .QueryByComponent<TargetComponent>(transform.Position, WARMTH_RADIUS)
-                .Where(e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Campfire)
-                .Any();
-            
+
+            // Use predicate in spatial query to avoid LINQ allocations
+            var nearbyCampfires = Universe.EntityManager.Instance.SpatialPartition
+                .QueryCircle(transform.Position, WARMTH_RADIUS,
+                    e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Campfire,
+                    maxResults: 1);
+
             // If near a campfire, warmth is not a priority
-            if (nearbyCampfires)
+            if (nearbyCampfires != null && nearbyCampfires.Count > 0)
                 return 0f;
         }
         
@@ -36,20 +38,9 @@ public class StayWarmGoal : IUtilityGoal
         
         int currentSticks = npcData.Resources.TryGetValue(TargetType.Stick, out var sticks) ? sticks : 0;
         
-        // If cold (no campfire nearby) and can afford to build one, prioritize it
-        // Lower priority than immediate needs like hunger
-        if (currentSticks >= 16)
-        {
-            return 0.4f; // Build campfire if we have materials
-        }
-        else if (currentSticks >= 8)
-        {
-            return 0.3f; // Gathering, getting close
-        }
-        else
-        {
-            return 0.2f; // Start gathering for future warmth
-        }
+        // Linear growth from 0.3 with 0 sticks to 0.5 with 16 sticks
+        float utility = 0.3f + (currentSticks / 16f) * 0.2f;
+        return Mathf.Clamp(utility, 0.3f, 0.5f);
     }
     
     public State GetGoalState(Entity agent)
@@ -66,13 +57,15 @@ public class StayWarmGoal : IUtilityGoal
         // Satisfied when agent is near a campfire
         if (!agent.TryGetComponent<TransformComponent2D>(out var transform))
             return false;
-        
+
         const float WARMTH_RADIUS = 150f;
-        var nearbyCampfires = Universe.EntityManager.Instance
-            .QueryByComponent<TargetComponent>(transform.Position, WARMTH_RADIUS)
-            .Where(e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Campfire)
-            .Any();
-        
-        return nearbyCampfires;
+
+        // Use predicate in spatial query to avoid LINQ allocations
+        var nearbyCampfires = Universe.EntityManager.Instance.SpatialPartition
+            .QueryCircle(transform.Position, WARMTH_RADIUS,
+                e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Campfire,
+                maxResults: 1);
+
+        return nearbyCampfires != null && nearbyCampfires.Count > 0;
     }
 }

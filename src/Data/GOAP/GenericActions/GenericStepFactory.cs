@@ -58,7 +58,7 @@ public class GenericStepFactory : IStepFactory
         var config = new StepConfig($"GoTo_{type}")
         {
             ActionFactory = () => new MoveToEntityAction(
-                EntityFinderConfig.ByTargetType(type, requireUnreserved: true, shouldReserve: true),
+                EntityFinderConfig.ByTargetType(type, radius: 5000f, requireUnreserved: true, shouldReserve: true),
                 reachDistance: 64f,
                 actionName: $"GoTo_{type}"
             ),
@@ -94,9 +94,9 @@ public class GenericStepFactory : IStepFactory
                 new EntityFinderConfig
                 {
                     Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == type,
-                    SearchRadius = 100f,
-                    // ✅ FIXED: Reserve on pickup (works with or without prior move step)
-                    RequireUnreserved = false,  // May already be reserved by us from move
+                    SearchRadius = 128f, // Should be nearby from movement step
+                    // ✅ FIXED: Only target unreserved items or items reserved by us
+                    RequireUnreserved = true,   // IsAvailableFor returns true for unreserved OR reserved by us
                     RequireReservation = false, // Don't require pre-existing reservation
                     ShouldReserve = true        // Reserve it ourselves when we start
                 },
@@ -150,7 +150,7 @@ public class GenericStepFactory : IStepFactory
                 new EntityFinderConfig
                 {
                     Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Tree,
-                    SearchRadius = 64f,
+                    SearchRadius = 128f, // Should be nearby from movement step
                     // ✅ Take ownership of reservation from GoTo_Tree to prevent leaks
                     RequireReservation = false,
                     ShouldReserve = true  // Re-reserve (idempotent if already reserved by us)
@@ -210,7 +210,7 @@ public class GenericStepFactory : IStepFactory
                 new EntityFinderConfig
                 {
                     Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Food,
-                    SearchRadius = 100f,
+                    SearchRadius = 128f, // Should be nearby from movement step
                     // ✅ Take ownership of reservation from GoTo_Food to prevent leaks
                     RequireReservation = false,
                     ShouldReserve = true  // Re-reserve (idempotent if already reserved by us)

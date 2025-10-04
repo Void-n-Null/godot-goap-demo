@@ -167,11 +167,9 @@ public partial class CameraController2D : Camera2D
 			_lastDragInstantVelocity = Vector2.Zero;
 		}
 
-		if (!_passedDeadZone)
-		{
-			if ((frameScreenMousePosition - _dragStartMouseScreen).Length() >= InertiaDeadZonePixels)
-				_passedDeadZone = true;
-		}
+		if (_passedDeadZone) return;
+		if ((frameScreenMousePosition - _dragStartMouseScreen).Length() >= InertiaDeadZonePixels)
+			_passedDeadZone = true;
 	}
 
 	private void StepZoom(float dt, Vector2 frameGlobalMousePosition)

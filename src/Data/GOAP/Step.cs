@@ -28,7 +28,8 @@ public class Step
     {
         foreach (var precond in Preconditions)
         {
-            if (!ctx.Facts.TryGetValue(precond.Key, out var currentValue))
+            // Use direct TryGetValue instead of Facts property to avoid unnecessary view creation
+            if (!ctx.TryGetValue(precond.Key, out var currentValue))
             {
                 return false;
             }

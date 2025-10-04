@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Game.Data.Components;
 using Game.Universe;
@@ -37,25 +38,8 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
             return;
         }
 
-        // Find target entity
-        var candidates = ServiceLocator.EntityManager
-            .QueryByComponent<TransformComponent2D>(agent.Transform.Position, _finderConfig.SearchRadius)
-            .Where(_finderConfig.Filter);
-
-        // Apply reservation filters
-        if (_finderConfig.RequireUnreserved)
-        {
-            candidates = candidates.Where(e => ResourceReservationManager.Instance.IsAvailableFor(e, agent));
-        }
-        else if (_finderConfig.RequireReservation)
-        {
-            candidates = candidates.Where(e => ResourceReservationManager.Instance.IsReservedBy(e, agent));
-        }
-
-        // Get nearest
-        _targetEntity = candidates
-            .OrderBy(e => agent.Transform.Position.DistanceTo(e.Transform.Position))
-            .FirstOrDefault();
+        // Use expanding search to find nearest entity without querying entire world
+        _targetEntity = FindNearestTarget(agent);
 
         if (_targetEntity == null)
         {
@@ -74,6 +58,45 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
 
         _motor.OnTargetReached += OnArrived;
         _motor.Target = _targetEntity.Transform.Position;
+    }
+
+    private Entity FindNearestTarget(Entity agent)
+    {
+        // Expanding search: start with configured radius, expand up to 3 times if needed
+        float searchRadius = _finderConfig.SearchRadius;
+        const int MAX_ATTEMPTS = 3;
+        var random = new Random();
+
+        for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++)
+        {
+            var candidates = ServiceLocator.EntityManager
+                .QueryByComponent<TransformComponent2D>(agent.Transform.Position, searchRadius)
+                .Where(_finderConfig.Filter);
+
+            // Apply reservation filters
+            if (_finderConfig.RequireUnreserved)
+            {
+                candidates = candidates.Where(e => ResourceReservationManager.Instance.IsAvailableFor(e, agent));
+            }
+            else if (_finderConfig.RequireReservation)
+            {
+                candidates = candidates.Where(e => ResourceReservationManager.Instance.IsReservedBy(e, agent));
+            }
+
+            // Get nearest with small random offset to reduce contention
+            // (prevents all agents from targeting the exact same tree/resource)
+            var nearest = candidates
+                .OrderBy(e => agent.Transform.Position.DistanceTo(e.Transform.Position) + (float)random.NextDouble() * 50f)
+                .FirstOrDefault();
+
+            if (nearest != null)
+                return nearest;
+
+            // Expand search radius for next attempt
+            searchRadius *= 2f;
+        }
+
+        return null;
     }
 
     private void OnArrived() => _arrived = true;
@@ -119,8 +142,8 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
     {
         if (_failed) return false;
 
-        // Check if target still exists
-        if (_targetEntity == null || !EntityManager.Instance.AllEntities.Contains(_targetEntity))
+        // Check if target still exists and is active (O(1) instead of O(n) linear search)
+        if (_targetEntity == null || !_targetEntity.IsActive)
             return false;
 
         return true;

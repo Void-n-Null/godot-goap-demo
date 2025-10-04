@@ -23,6 +23,17 @@ public class GlobalWorldStateManager
 	
 	// Cache enum values to avoid repeated allocations
 	private static readonly TargetType[] _cachedTargetTypes = (TargetType[])Enum.GetValues(typeof(TargetType));
+	private static readonly string[] _cachedTargetTypeStrings;
+
+	// Static constructor to cache type strings
+	static GlobalWorldStateManager()
+	{
+		_cachedTargetTypeStrings = new string[_cachedTargetTypes.Length];
+		for (int i = 0; i < _cachedTargetTypes.Length; i++)
+		{
+			_cachedTargetTypeStrings[i] = _cachedTargetTypes[i].ToString();
+		}
+	}
 
 	private GlobalWorldStateManager() { }
 
@@ -110,10 +121,10 @@ public class GlobalWorldStateManager
 			}
 		}
 
-		// Store counts in dictionaries (done once after counting)
+		// Store counts in dictionaries (done once after counting) - use cached strings
 		for (int i = 0; i < _cachedTargetTypes.Length; i++)
 		{
-			var targetName = _cachedTargetTypes[i].ToString();
+			var targetName = _cachedTargetTypeStrings[i]; // Use pre-cached string
 			int count = targetCounts[i];
 			_cachedWorldData.EntityCounts[targetName] = count;
 			_cachedWorldData.AvailabilityFlags[$"Available_{targetName}"] = count > 0;

@@ -67,6 +67,7 @@ public partial class NPCInspectorPanel : SingletonNode<NPCInspectorPanel>
 
 		// Add padding
 		var margin = new MarginContainer();
+		margin.MouseFilter = Control.MouseFilterEnum.Ignore;
 		margin.AddThemeConstantOverride("margin_left", 15);
 		margin.AddThemeConstantOverride("margin_right", 15);
 		margin.AddThemeConstantOverride("margin_top", 15);
@@ -74,48 +75,59 @@ public partial class NPCInspectorPanel : SingletonNode<NPCInspectorPanel>
 		_content.AddChild(margin);
 
 		var innerContent = new VBoxContainer();
+		innerContent.MouseFilter = Control.MouseFilterEnum.Ignore;
 		innerContent.AddThemeConstantOverride("separation", 15);
 		margin.AddChild(innerContent);
 
 		// Title
 		_titleLabel = new Label { Name = "TitleLabel" };
+		_titleLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
 		_titleLabel.AddThemeFontSizeOverride("font_size", 18);
 		innerContent.AddChild(_titleLabel);
 
 		// Add separator
 		var sep1 = new HSeparator();
+		sep1.MouseFilter = Control.MouseFilterEnum.Ignore;
 		innerContent.AddChild(sep1);
 
 		// Stats section
 		var statsTitle = new Label { Text = "Stats" };
+		statsTitle.MouseFilter = Control.MouseFilterEnum.Ignore;
 		statsTitle.AddThemeFontSizeOverride("font_size", 14);
 		innerContent.AddChild(statsTitle);
 
 		_statsLabel = new Label { Name = "StatsLabel" };
+		_statsLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
 		_statsLabel.AddThemeFontSizeOverride("font_size", 12);
 		innerContent.AddChild(_statsLabel);
 
 		// Inventory section
 		var sep2 = new HSeparator();
+		sep2.MouseFilter = Control.MouseFilterEnum.Ignore;
 		innerContent.AddChild(sep2);
 
 		var invTitle = new Label { Text = "Inventory" };
+		invTitle.MouseFilter = Control.MouseFilterEnum.Ignore;
 		invTitle.AddThemeFontSizeOverride("font_size", 14);
 		innerContent.AddChild(invTitle);
 
 		_inventoryLabel = new Label { Name = "InventoryLabel" };
+		_inventoryLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
 		_inventoryLabel.AddThemeFontSizeOverride("font_size", 12);
 		innerContent.AddChild(_inventoryLabel);
 
 		// AI Behavior section
 		var sep3 = new HSeparator();
+		sep3.MouseFilter = Control.MouseFilterEnum.Ignore;
 		innerContent.AddChild(sep3);
 
 		var aiTitle = new Label { Text = "AI Behavior" };
+		aiTitle.MouseFilter = Control.MouseFilterEnum.Ignore;
 		aiTitle.AddThemeFontSizeOverride("font_size", 14);
 		innerContent.AddChild(aiTitle);
 
 		_aiLabel = new Label { Name = "AILabel" };
+		_aiLabel.MouseFilter = Control.MouseFilterEnum.Ignore;
 		_aiLabel.AddThemeFontSizeOverride("font_size", 12);
 		innerContent.AddChild(_aiLabel);
 

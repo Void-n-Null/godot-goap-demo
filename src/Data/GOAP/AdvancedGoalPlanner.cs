@@ -53,74 +53,53 @@ public static class AdvancedGoalPlanner
 
     /// <summary>
     /// Computes a deterministic int hash for a state to track visited states.
-    /// Uses a stable key ordering and System.HashCode to avoid allocations from
-    /// string.Join / LINQ each lookup.
+    /// Now delegates to State.GetDeterministicHash() which caches the result.
     /// </summary>
     private static int ComputeStateHash(State state)
     {
-        if (state?.Facts == null || state.Facts.Count == 0) return 0;
-
-        // Get keys and sort deterministically (ordinal)
-        var keys = state.Facts.Keys.ToArray();
-        Array.Sort(keys, StringComparer.Ordinal);
-
-        int hash = 0;
-        foreach (var key in keys)
-        {
-            var value = state.Facts[key];
-            hash = HashCode.Combine(hash, key, value);
-        }
-
-        return hash;
+        return state?.GetDeterministicHash() ?? 0;
     }
 
     /// <summary>
-    /// Applies step effects to current state to create new state facts.
-    /// Uses a pre-sized dictionary to reduce allocations.
+    /// Creates a delta dictionary with only the step effects.
+    /// Returns a lightweight delta instead of copying all facts.
     /// </summary>
-    private static Dictionary<string, object> ApplyStepEffects(State currentState, Step step)
+    private static Dictionary<string, object> CreateStepDelta(State currentState, Step step)
     {
-        // Pre-size dictionary to avoid resizing during adds
-        var newFacts = new Dictionary<string, object>(currentState.Facts.Count + step.Effects.Count);
-        
-        // Copy current facts
-        foreach (var kvp in currentState.Facts)
-        {
-            newFacts[kvp.Key] = kvp.Value;
-        }
-        
-        // Apply step effects (may overwrite existing facts)
+        // Only store the changes (delta), not the full state
+        var delta = new Dictionary<string, object>(step.Effects.Count);
+
         foreach (var kvp in step.Effects)
         {
-            object newValue = kvp.Value is Func<State, object> func 
-                ? func(currentState) 
+            delta[kvp.Key] = kvp.Value is Func<State, object> func
+                ? func(currentState)
                 : kvp.Value;
-            newFacts[kvp.Key] = newValue;
         }
-        
-        return newFacts;
+
+        return delta;
     }
 
     /// <summary>
     /// Creates a successor state by applying a step to the current state.
-    /// Uses parent-pointer pattern to eliminate O(n) path copying.
+    /// Uses layered state with parent pointer - only stores the delta to minimize allocations.
     /// </summary>
     private static (State state, PathNode path, double gCost, float fScore) CreateSuccessorState(
-        State currentState, 
-        Step step, 
-        PathNode currentPath, 
-        double currentGCost, 
+        State currentState,
+        Step step,
+        PathNode currentPath,
+        double currentGCost,
         State goalState)
     {
-        var newFacts = ApplyStepEffects(currentState, step);
-        var newState = new State(newFacts);
+        // Create layered state: parent + delta (avoids copying all facts)
+        var delta = CreateStepDelta(currentState, step);
+        var newState = new State(currentState, delta);
         var newPath = new PathNode(step, currentPath); // O(1) instead of O(n)
-        
+
         double stepCost = step.GetCost(currentState);
         double newGCost = currentGCost + stepCost;
         float heuristic = StateComparison.CalculateStateComparisonHeuristic(newState, goalState);
         float fScore = (float)newGCost + heuristic;
-        
+
         return (newState, newPath, newGCost, fScore);
     }
 
@@ -153,7 +132,7 @@ public static class AdvancedGoalPlanner
 
     #endregion
 
-    private static List<Step> GenerateStepsForState(State state)
+    private static List<Step> GenerateStepsForState(State state, State goalState)
     {
         var allSteps = new List<Step>();
         foreach (var factory in CachedFactories)
@@ -169,7 +148,74 @@ public static class AdvancedGoalPlanner
                 GD.PushError($"Stack trace: {e.StackTrace}");
             }
         }
-        return allSteps;
+
+        // Prune irrelevant steps to reduce search space
+        return PruneWithDependencies(allSteps, goalState);
+    }
+
+    /// <summary>
+    /// Prunes steps that are irrelevant to the goal using dependency analysis.
+    /// Keeps steps that directly achieve the goal plus steps that enable them (transitive closure).
+    /// </summary>
+    private static List<Step> PruneWithDependencies(List<Step> allSteps, State goalState)
+    {
+        var relevant = new HashSet<Step>();
+        var queue = new Queue<Step>();
+
+        // Phase 1: Find steps that directly achieve goal
+        foreach (var step in allSteps)
+        {
+            // Check if any effect contributes to any goal fact
+            foreach (var goalFact in goalState.Facts)
+            {
+                if (step.Effects.ContainsKey(goalFact.Key))
+                {
+                    relevant.Add(step);
+                    queue.Enqueue(step);
+                    break;
+                }
+            }
+        }
+
+        // Phase 2: Backward chain - find steps that enable goal-achieving steps
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+
+            // Find steps that satisfy this step's preconditions
+            foreach (var step in allSteps)
+            {
+                if (relevant.Contains(step))
+                    continue;
+
+                // Does this step provide any precondition for current?
+                bool providesPrerequisite = false;
+                foreach (var precondition in current.Preconditions)
+                {
+                    if (step.Effects.ContainsKey(precondition.Key))
+                    {
+                        providesPrerequisite = true;
+                        break;
+                    }
+                }
+
+                if (providesPrerequisite)
+                {
+                    relevant.Add(step);
+                    queue.Enqueue(step);
+                }
+            }
+        }
+
+        var pruned = relevant.ToList();
+
+        // Debug output to show pruning effectiveness
+        if (allSteps.Count > pruned.Count)
+        {
+            GD.Print($"[Pruning] Reduced steps from {allSteps.Count} to {pruned.Count} ({100.0 * pruned.Count / allSteps.Count:F1}% retained)");
+        }
+
+        return pruned;
     }
 
     /// <summary>
@@ -196,7 +242,7 @@ public static class AdvancedGoalPlanner
     public static Plan ForwardPlan(State initialState, State goalState, PlanningConfig config = null){
         config ??= DefaultConfig;
         //Alright, when we start, these are all the steps we can take.
-        var steps = GenerateStepsForState(initialState);
+        var steps = GenerateStepsForState(initialState, goalState);
         
         //Now then... Let's begin our A* Forward planning!
         var openSet = new PriorityQueue<(State state, PathNode path, double gCost, float fScore), float>();
@@ -235,12 +281,12 @@ public static class AdvancedGoalPlanner
                 continue;
             }
 
-            // Get valid steps for current state
-            var validSteps = steps.Where(s => s.CanRun(currentState)).ToList();
-
-            // Expand each valid step
-            foreach (var step in validSteps)
+            // Expand valid steps (avoid allocating intermediate list)
+            foreach (var step in steps)
             {
+                if (!step.CanRun(currentState))
+                    continue;
+
                 var successor = CreateSuccessorState(currentState, step, pathNode, gCost, goalState);
                 openSet.Enqueue(successor, successor.fScore);
 
@@ -259,12 +305,13 @@ public static class AdvancedGoalPlanner
     {
         config ??= DefaultConfig;
 
-        var steps = GenerateStepsForState(initialState);
-        
+        var steps = GenerateStepsForState(initialState, goalState);
+
         // Thread-safe collections for parallel processing
         var openSet = new PriorityQueue<(State state, PathNode path, double gCost, float fScore), float>();
         var openSetLock = new object();
-        var visited = new ConcurrentDictionary<int, bool>();
+        // Pre-size visited set to reduce resizing during search (typical search explores 100-1000 states)
+        var visited = new ConcurrentDictionary<int, bool>(System.Environment.ProcessorCount, 512);
         
         var initialHeuristic = StateComparison.CalculateStateComparisonHeuristic(initialState, goalState);
         openSet.Enqueue((initialState.Clone(), null, 0.0, initialHeuristic), initialHeuristic);
@@ -337,8 +384,14 @@ public static class AdvancedGoalPlanner
                     if (depth > config.MaxDepth)
                         return;
 
-                    // Get valid steps for this state
-                    var validSteps = steps.Where(s => s.CanRun(currentState)).ToList();
+                    // Collect valid steps for this state
+                    // We need to materialize here to decide whether to parallelize
+                    var validSteps = new List<Step>(steps.Count);
+                    foreach (var s in steps)
+                    {
+                        if (s.CanRun(currentState))
+                            validSteps.Add(s);
+                    }
 
                     // Expand valid steps (parallelize if many steps)
                     if (validSteps.Count > 8)

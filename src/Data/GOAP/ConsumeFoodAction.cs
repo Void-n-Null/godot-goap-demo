@@ -84,7 +84,8 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
     public bool StillValid(Entity agent)
     {
         if (_failed) return false;
-        return _foodTarget != null && EntityManager.Instance.AllEntities.Contains(_foodTarget);
+        // Use IsActive instead of expensive linear search through all entities
+        return _foodTarget != null && _foodTarget.IsActive;
     }
 
     public void Fail(string reason)
