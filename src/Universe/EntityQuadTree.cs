@@ -21,6 +21,11 @@ public sealed class EntityQuadTree
     private Node _root;
     private readonly Dictionary<Guid, Item> _items = new();
 
+    // CRITICAL OPTIMIZATION: Reusable query buffers to eliminate allocation churn
+    // These are safe because queries are not re-entrant (one query completes before next starts)
+    private readonly Stack<Node> _reusableStack = new(32); // Pre-sized for typical tree depth
+    private readonly List<Entity> _reusableResults = new(64); // Pre-sized for typical query results
+
     public EntityQuadTree(
         float initialExtent = 32768f,
         float minNodeSize = 32f,
@@ -94,95 +99,133 @@ public sealed class EntityQuadTree
         _root.Insert(item);
     }
 
+    /// <summary>
+    /// PERFORMANCE WARNING: Returns a REUSABLE list that is cleared on the next query.
+    /// Callers MUST consume results immediately before calling another query method.
+    /// Do NOT store the returned list or iterate it after subsequent queries.
+    /// </summary>
     public List<Entity> QueryCircle(Vector2 center, float radius, Func<Entity, bool> predicate = null, int maxResults = int.MaxValue)
     {
-        var results = new List<Entity>();
+        // CRITICAL: Reuse buffers to eliminate List/Stack allocations
+        _reusableResults.Clear();
+        _reusableStack.Clear();
+
         if (_root == null || radius < 0f || maxResults <= 0)
         {
-            return results;
+            return _reusableResults;
         }
 
         var searchRadius = radius <= 0f || float.IsInfinity(radius) ? float.PositiveInfinity : radius;
         var radiusSquared = float.IsPositiveInfinity(searchRadius) ? float.PositiveInfinity : searchRadius * searchRadius;
 
-        SpanQuery(center, radiusSquared, predicate, maxResults, results, QueryShape.Circle);
-        return results;
+        SpanQuery(center, radiusSquared, predicate, maxResults, _reusableResults, _reusableStack, QueryShape.Circle);
+        return _reusableResults;
     }
 
+    /// <summary>
+    /// PERFORMANCE WARNING: Returns a REUSABLE list that is cleared on the next query.
+    /// Callers MUST consume results immediately before calling another query method.
+    /// Do NOT store the returned list or iterate it after subsequent queries.
+    /// </summary>
     public List<Entity> QueryCircleWithCounts(Vector2 center, float radius, Func<Entity, bool> predicate, int maxResults, out int testedCount)
     {
         testedCount = 0;
-        var results = new List<Entity>();
+
+        // CRITICAL: Reuse buffers to eliminate List/Stack allocations
+        _reusableResults.Clear();
+        _reusableStack.Clear();
+
         if (_root == null || radius < 0f || maxResults <= 0)
         {
-            return results;
+            return _reusableResults;
         }
 
         var searchRadius = radius <= 0f || float.IsInfinity(radius) ? float.PositiveInfinity : radius;
         var radiusSquared = float.IsPositiveInfinity(searchRadius) ? float.PositiveInfinity : searchRadius * searchRadius;
 
-        var stack = new Stack<Node>();
-        stack.Push(_root);
+        _reusableStack.Push(_root);
 
-        while (stack.Count > 0 && results.Count < maxResults)
+        // OPTIMIZATION: Hoist invariant checks out of hot loop
+        bool hasRadius = !float.IsPositiveInfinity(radiusSquared);
+        bool hasPredicate = predicate != null;
+
+        while (_reusableStack.Count > 0 && _reusableResults.Count < maxResults)
         {
-            var node = stack.Pop();
+            var node = _reusableStack.Pop();
             if (!node.IntersectsCircle(center, radiusSquared))
                 continue;
 
-            for (int i = 0; i < node.Items.Count; i++)
-            {
-                if (results.Count >= maxResults)
-                    return results;
+            // CRITICAL OPTIMIZATION: Access node.Items once to help JIT optimize bounds checks
+            var items = node.Items;
+            int itemCount = items.Count;
 
-                var item = node.Items[i];
+            for (int i = 0; i < itemCount; i++)
+            {
+                if (_reusableResults.Count >= maxResults)
+                    return _reusableResults;
+
+                var item = items[i];
                 var entity = item.Entity;
-                var transform = entity?.Transform;
-                if (transform == null)
+                if (entity == null)
                     continue;
 
                 testedCount++;
 
-                if (!float.IsPositiveInfinity(radiusSquared))
+                // CRITICAL FIX: Use item.Position instead of entity.Transform.Position
+                // Item already caches position - avoids expensive Transform component lookup!
+                if (hasRadius)
                 {
-                    var distSq = transform.Position.DistanceSquaredTo(center);
+                    var dx = item.Position.X - center.X;
+                    var dy = item.Position.Y - center.Y;
+                    var distSq = dx * dx + dy * dy;
                     if (distSq > radiusSquared)
                         continue;
                 }
 
-                if (predicate != null && !predicate(entity))
+                // Apply predicate filter after spatial filter
+                if (hasPredicate && !predicate(entity))
                     continue;
 
-                results.Add(entity);
+                _reusableResults.Add(entity);
             }
 
             if (node.Children == null)
                 continue;
 
-            for (int i = 0; i < node.Children.Length; i++)
+            // OPTIMIZATION: Process children array directly
+            var children = node.Children;
+            for (int i = 0; i < children.Length; i++)
             {
-                var child = node.Children[i];
+                var child = children[i];
                 if (child == null)
                     continue;
                 if (!child.IntersectsCircle(center, radiusSquared))
                     continue;
-                stack.Push(child);
+                _reusableStack.Push(child);
             }
         }
 
-        return results;
+        return _reusableResults;
     }
 
+    /// <summary>
+    /// PERFORMANCE WARNING: Returns a REUSABLE list that is cleared on the next query.
+    /// Callers MUST consume results immediately before calling another query method.
+    /// Do NOT store the returned list or iterate it after subsequent queries.
+    /// </summary>
     public List<Entity> QueryRectangle(Rect2 area, Func<Entity, bool> predicate = null, int maxResults = int.MaxValue)
     {
-        var results = new List<Entity>();
+        // CRITICAL: Reuse buffers to eliminate List/Stack allocations
+        _reusableResults.Clear();
+        _reusableStack.Clear();
+
         if (_root == null || maxResults <= 0)
         {
-            return results;
+            return _reusableResults;
         }
 
-        SpanQuery(area, predicate, maxResults, results);
-        return results;
+        SpanQuery(area, predicate, maxResults, _reusableResults, _reusableStack);
+        return _reusableResults;
     }
 
     public Entity FindNearest(Vector2 center, float maxRadius, Func<Entity, bool> predicate = null)
@@ -197,52 +240,67 @@ public sealed class EntityQuadTree
         Entity closest = null;
         var bestDistSq = radiusSquared;
 
-        var stack = new Stack<Node>();
-        stack.Push(_root);
+        // CRITICAL: Reuse stack to eliminate allocation
+        _reusableStack.Clear();
+        _reusableStack.Push(_root);
 
-        while (stack.Count > 0)
+        // OPTIMIZATION: Hoist invariant check out of hot loop
+        bool hasPredicate = predicate != null;
+
+        while (_reusableStack.Count > 0)
         {
-            var node = stack.Pop();
+            var node = _reusableStack.Pop();
             if (!node.IntersectsCircle(center, bestDistSq))
                 continue;
 
-            for (int i = 0; i < node.Items.Count; i++)
+            // CRITICAL OPTIMIZATION: Access node.Items once to help JIT optimize bounds checks
+            var items = node.Items;
+            int itemCount = items.Count;
+
+            for (int i = 0; i < itemCount; i++)
             {
-                var item = node.Items[i];
+                var item = items[i];
                 var candidate = item.Entity;
-                var candidateTransform = candidate?.Transform;
-                if (candidateTransform == null)
+                if (candidate == null)
                     continue;
-                if (predicate != null && !predicate(candidate))
+
+                // Apply predicate filter first (cheaper than distance calculation)
+                if (hasPredicate && !predicate(candidate))
                     continue;
-                var distSq = candidateTransform.Position.DistanceSquaredTo(center);
+
+                // CRITICAL FIX: Use item.Position instead of candidate.Transform.Position
+                // Item already caches position - avoids expensive Transform component lookup!
+                var dx = item.Position.X - center.X;
+                var dy = item.Position.Y - center.Y;
+                var distSq = dx * dx + dy * dy;
+
                 if (distSq >= bestDistSq)
                     continue;
+
                 closest = candidate;
                 bestDistSq = distSq;
             }
 
             if (node.Children != null)
             {
-                for (int i = 0; i < node.Children.Length; i++)
+                // OPTIMIZATION: Process children array directly
+                var children = node.Children;
+                for (int i = 0; i < children.Length; i++)
                 {
-                    var child = node.Children[i];
+                    var child = children[i];
                     if (child == null)
                         continue;
                     if (!child.IntersectsCircle(center, bestDistSq))
                         continue;
-                    stack.Push(child);
+                    _reusableStack.Push(child);
                 }
             }
         }
 
-        if (!float.IsPositiveInfinity(radius) && closest != null)
+        // Final radius check only if needed
+        if (!float.IsPositiveInfinity(radius) && closest != null && bestDistSq > radiusSquared)
         {
-            var actualDistSq = closest.Transform.Position.DistanceSquaredTo(center);
-            if (actualDistSq > radiusSquared)
-            {
-                return null;
-            }
+            return null;
         }
 
         return closest;
@@ -261,53 +319,69 @@ public sealed class EntityQuadTree
         Entity closest = null;
         var bestDistSq = radiusSquared;
 
-        var stack = new Stack<Node>();
-        stack.Push(_root);
+        // CRITICAL: Reuse stack to eliminate allocation
+        _reusableStack.Clear();
+        _reusableStack.Push(_root);
 
-        while (stack.Count > 0)
+        // OPTIMIZATION: Hoist invariant check out of hot loop
+        bool hasPredicate = predicate != null;
+
+        while (_reusableStack.Count > 0)
         {
-            var node = stack.Pop();
+            var node = _reusableStack.Pop();
             if (!node.IntersectsCircle(center, bestDistSq))
                 continue;
 
-            for (int i = 0; i < node.Items.Count; i++)
+            // CRITICAL OPTIMIZATION: Access node.Items once to help JIT optimize bounds checks
+            var items = node.Items;
+            int itemCount = items.Count;
+
+            for (int i = 0; i < itemCount; i++)
             {
-                var item = node.Items[i];
+                var item = items[i];
                 var candidate = item.Entity;
-                var candidateTransform = candidate?.Transform;
-                if (candidateTransform == null)
+                if (candidate == null)
                     continue;
+
                 testedCount++;
-                if (predicate != null && !predicate(candidate))
+
+                // Apply predicate filter first (cheaper than distance calculation)
+                if (hasPredicate && !predicate(candidate))
                     continue;
-                var distSq = candidateTransform.Position.DistanceSquaredTo(center);
+
+                // CRITICAL FIX: Use item.Position instead of candidate.Transform.Position
+                // Item already caches position - avoids expensive Transform component lookup!
+                var dx = item.Position.X - center.X;
+                var dy = item.Position.Y - center.Y;
+                var distSq = dx * dx + dy * dy;
+
                 if (distSq >= bestDistSq)
                     continue;
+
                 closest = candidate;
                 bestDistSq = distSq;
             }
 
             if (node.Children != null)
             {
-                for (int i = 0; i < node.Children.Length; i++)
+                // OPTIMIZATION: Process children array directly
+                var children = node.Children;
+                for (int i = 0; i < children.Length; i++)
                 {
-                    var child = node.Children[i];
+                    var child = children[i];
                     if (child == null)
                         continue;
                     if (!child.IntersectsCircle(center, bestDistSq))
                         continue;
-                    stack.Push(child);
+                    _reusableStack.Push(child);
                 }
             }
         }
 
-        if (!float.IsPositiveInfinity(radius) && closest != null)
+        // Final radius check only if needed
+        if (!float.IsPositiveInfinity(radius) && closest != null && bestDistSq > radiusSquared)
         {
-            var actualDistSq = closest.Transform.Position.DistanceSquaredTo(center);
-            if (actualDistSq > radiusSquared)
-            {
-                return null;
-            }
+            return null;
         }
 
         return closest;
@@ -316,11 +390,14 @@ public sealed class EntityQuadTree
     public void ForEachNode(Action<Rect2, Rect2, int, int> visitor, bool includeEmpty = true)
     {
         if (visitor == null || _root == null) return;
-        var stack = new Stack<Node>();
-        stack.Push(_root);
-        while (stack.Count > 0)
+
+        // CRITICAL: Reuse stack to eliminate allocation
+        _reusableStack.Clear();
+        _reusableStack.Push(_root);
+
+        while (_reusableStack.Count > 0)
         {
-            var node = stack.Pop();
+            var node = _reusableStack.Pop();
             int count = node.Items.Count;
             if (includeEmpty || count > 0)
             {
@@ -331,7 +408,7 @@ public sealed class EntityQuadTree
                 for (int i = 0; i < node.Children.Length; i++)
                 {
                     var child = node.Children[i];
-                    if (child != null) stack.Push(child);
+                    if (child != null) _reusableStack.Push(child);
                 }
             }
         }
@@ -349,39 +426,49 @@ public sealed class EntityQuadTree
         }
     }
 
-    private void SpanQuery(Vector2 center, float radiusSquared, Func<Entity, bool> predicate, int maxResults, List<Entity> results, QueryShape shape)
+    private void SpanQuery(Vector2 center, float radiusSquared, Func<Entity, bool> predicate, int maxResults, List<Entity> results, Stack<Node> stack, QueryShape shape)
     {
-        var stack = new Stack<Node>();
+        // Stack is already cleared and ready to use
         stack.Push(_root);
+
+        // OPTIMIZATION: Hoist invariant checks out of hot loop
+        bool hasRadius = !float.IsPositiveInfinity(radiusSquared);
+        bool hasPredicate = predicate != null;
 
         while (stack.Count > 0 && results.Count < maxResults)
         {
             var node = stack.Pop();
-            if (shape == QueryShape.Circle)
-            {
-                if (!node.IntersectsCircle(center, radiusSquared))
-                    continue;
-            }
+            if (shape == QueryShape.Circle && !node.IntersectsCircle(center, radiusSquared))
+                continue;
 
-            for (int i = 0; i < node.Items.Count; i++)
+            // CRITICAL OPTIMIZATION: Access node.Items.Count once to help JIT optimize bounds checks
+            var items = node.Items;
+            int itemCount = items.Count;
+
+            for (int i = 0; i < itemCount; i++)
             {
                 if (results.Count >= maxResults)
                     return;
 
-                var item = node.Items[i];
+                var item = items[i];
                 var entity = item.Entity;
-                var transform = entity?.Transform;
-                if (transform == null)
-                    continue;
-                if (predicate != null && !predicate(entity))
+                if (entity == null)
                     continue;
 
-                if (shape == QueryShape.Circle && !float.IsPositiveInfinity(radiusSquared))
+                // CRITICAL FIX: Use item.Position instead of entity.Transform.Position
+                // Item already caches position - avoids expensive Transform component lookup!
+                if (shape == QueryShape.Circle && hasRadius)
                 {
-                    var distSq = transform.Position.DistanceSquaredTo(center);
+                    var dx = item.Position.X - center.X;
+                    var dy = item.Position.Y - center.Y;
+                    var distSq = dx * dx + dy * dy;
                     if (distSq > radiusSquared)
                         continue;
                 }
+
+                // Apply predicate filter after spatial filter (predicate is usually more expensive)
+                if (hasPredicate && !predicate(entity))
+                    continue;
 
                 results.Add(entity);
             }
@@ -389,25 +476,27 @@ public sealed class EntityQuadTree
             if (node.Children == null)
                 continue;
 
-            for (int i = 0; i < node.Children.Length; i++)
+            // OPTIMIZATION: Process children array directly
+            var children = node.Children;
+            for (int i = 0; i < children.Length; i++)
             {
-                var child = node.Children[i];
+                var child = children[i];
                 if (child == null)
                     continue;
-                if (shape == QueryShape.Circle)
-                {
-                    if (!child.IntersectsCircle(center, radiusSquared))
-                        continue;
-                }
+                if (shape == QueryShape.Circle && !child.IntersectsCircle(center, radiusSquared))
+                    continue;
                 stack.Push(child);
             }
         }
     }
 
-    private void SpanQuery(Rect2 area, Func<Entity, bool> predicate, int maxResults, List<Entity> results)
+    private void SpanQuery(Rect2 area, Func<Entity, bool> predicate, int maxResults, List<Entity> results, Stack<Node> stack)
     {
-        var stack = new Stack<Node>();
+        // Stack is already cleared and ready to use
         stack.Push(_root);
+
+        // OPTIMIZATION: Hoist invariant check out of hot loop
+        bool hasPredicate = predicate != null;
 
         while (stack.Count > 0 && results.Count < maxResults)
         {
@@ -415,29 +504,40 @@ public sealed class EntityQuadTree
             if (!node.IntersectsRect(area))
                 continue;
 
-            for (int i = 0; i < node.Items.Count; i++)
+            // CRITICAL OPTIMIZATION: Access node.Items once to help JIT optimize bounds checks
+            var items = node.Items;
+            int itemCount = items.Count;
+
+            for (int i = 0; i < itemCount; i++)
             {
                 if (results.Count >= maxResults)
                     return;
 
-                var item = node.Items[i];
+                var item = items[i];
                 var entity = item.Entity;
-                var transform = entity?.Transform;
-                if (transform == null)
+                if (entity == null)
                     continue;
-                if (predicate != null && !predicate(entity))
+
+                // CRITICAL FIX: Use item.Position instead of entity.Transform.Position
+                // Item already caches position - avoids expensive Transform component lookup!
+                if (!area.HasPoint(item.Position))
                     continue;
-                if (!area.HasPoint(transform.Position))
+
+                // Apply predicate filter after spatial filter
+                if (hasPredicate && !predicate(entity))
                     continue;
+
                 results.Add(entity);
             }
 
             if (node.Children == null)
                 continue;
 
-            for (int i = 0; i < node.Children.Length; i++)
+            // OPTIMIZATION: Process children array directly
+            var children = node.Children;
+            for (int i = 0; i < children.Length; i++)
             {
-                var child = node.Children[i];
+                var child = children[i];
                 if (child == null)
                     continue;
                 if (!child.IntersectsRect(area))
@@ -577,12 +677,25 @@ public sealed class EntityQuadTree
         public bool IntersectsCircle(Vector2 center, float radiusSquared)
         {
             if (float.IsPositiveInfinity(radiusSquared))
-            {
                 return true;
-            }
 
-            var closestX = Mathf.Clamp(center.X, Bounds.Position.X, Bounds.Position.X + Bounds.Size.X);
-            var closestY = Mathf.Clamp(center.Y, Bounds.Position.Y, Bounds.Position.Y + Bounds.Size.Y);
+            // OPTIMIZATION: Cache bounds for reuse and avoid repeated property access
+            // This helps JIT optimize bounds checks and reduces virtual calls
+            var bounds = Bounds;
+            var left = bounds.Position.X;
+            var right = left + bounds.Size.X;
+            var top = bounds.Position.Y;
+            var bottom = top + bounds.Size.Y;
+
+            // OPTIMIZATION: Early out if circle center is completely inside bounds
+            // This avoids the closest-point calculation when the query circle fully contains the node
+            // Common case when radius is large or node is small
+            if (center.X >= left && center.X <= right && center.Y >= top && center.Y <= bottom)
+                return true;
+
+            var closestX = center.X < left ? left : center.X > right ? right : center.X;
+            var closestY = center.Y < top ? top : center.Y > bottom ? bottom : center.Y;
+            
             var dx = center.X - closestX;
             var dy = center.Y - closestY;
             return dx * dx + dy * dy <= radiusSquared;

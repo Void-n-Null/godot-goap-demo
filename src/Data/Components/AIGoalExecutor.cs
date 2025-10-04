@@ -45,6 +45,14 @@ public class AIGoalExecutor : IActiveComponent
 	private static readonly Dictionary<string, int> _targetTypeStringToIndex;
 	private string _cachedAgentId; // Cache agent ID string to avoid repeated ToString()
 
+	// Reusable dictionary to eliminate allocation churn (CRITICAL: reduces Dictionary.set_Item overhead)
+	private Dictionary<string, object> _reusableFacts;
+
+	// Proximity cache to reduce expensive spatial queries
+	private Dictionary<string, object> _cachedProximityFacts;
+	private float _lastProximityUpdate;
+	private const float PROXIMITY_UPDATE_INTERVAL = 0.2f; // Update proximity every 200ms instead of every frame
+
 	// Static constructor to initialize cached type strings
 	static AIGoalExecutor()
 	{
@@ -74,6 +82,7 @@ public class AIGoalExecutor : IActiveComponent
 			// Cancel current plan when goal changes
 			_currentPlan = null;
 			_worldStateCache = null;
+			_cachedProximityFacts?.Clear(); // Invalidate proximity cache when goal changes
 		}
 	}
 
@@ -170,7 +179,15 @@ public class AIGoalExecutor : IActiveComponent
 			if (shouldPlan)
 			{
 				_planningInProgress = true;
-				_lastPlanningState = new Dictionary<string, object>(currentState.Facts);
+				// Reuse planning state dictionary if possible
+				if (_lastPlanningState == null)
+					_lastPlanningState = new Dictionary<string, object>(currentState.Facts);
+				else
+				{
+					_lastPlanningState.Clear();
+					foreach (var kvp in currentState.Facts)
+						_lastPlanningState[kvp.Key] = kvp.Value;
+				}
 				_lastPlanningTime = planningTime;
 				_forceReplan = false; // Reset force flag
 
@@ -204,6 +221,7 @@ public class AIGoalExecutor : IActiveComponent
 					var failedGoal = _currentGoal;
 					_currentPlan = null;
 					_worldStateCache = null;
+					_cachedProximityFacts?.Clear(); // Invalidate proximity cache on failure
 					_consecutiveFailures++;
 
 					// Only force immediate replan for first few failures
@@ -228,6 +246,11 @@ public class AIGoalExecutor : IActiveComponent
 	{
 		// Cache agent ID string once to avoid repeated ToString() calls
 		_cachedAgentId = Entity.Id.ToString();
+
+		// Pre-allocate dictionaries to eliminate GC pressure
+		// Typical fact count: ~20-30 facts per agent
+		_reusableFacts = new Dictionary<string, object>(32);
+		_cachedProximityFacts = new Dictionary<string, object>(16);
 	}
 
 	public void OnPostAttached()
@@ -268,8 +291,10 @@ public class AIGoalExecutor : IActiveComponent
 
 	private State BuildCurrentState()
 	{
-		var facts = new Dictionary<string, object>();
-		
+		// CRITICAL: Reuse dictionary to eliminate allocation overhead
+		var facts = _reusableFacts;
+		facts.Clear();
+
 		// Add agent metadata
 		if (Entity.TryGetComponent<TransformComponent2D>(out var transform))
 		{
@@ -277,19 +302,30 @@ public class AIGoalExecutor : IActiveComponent
 		}
 		facts[FactKeys.AgentId] = _cachedAgentId;
 
-		// Get SHARED world data (computed once globally, not per-agent!)
-		var worldData = GlobalWorldStateManager.Instance.GetWorldState();
-		
-		
-
 		if (Entity.TryGetComponent<NPCData>(out var npcData))
-			AddNPCFacts(facts, worldData, npcData, _cachedTargetTypes, _cachedTargetTypeStrings);
+			AddNPCFacts(facts, npcData, _cachedTargetTypes);
 
-		// Compute proximity facts AND available resource counts in ONE spatial query
-		// OPTIMIZED: Single pass provides both proximity and reservation-aware availability
-		if (Entity.TryGetComponent<TransformComponent2D>(out var agentTransform))
-			AddProximityAndAvailabilityFacts(facts, agentTransform, Entity, _cachedTargetTypes, _cachedTargetTypeStrings);
-		
+		// OPTIMIZED: Cache proximity facts and only update every PROXIMITY_UPDATE_INTERVAL
+		// This dramatically reduces expensive QueryCircle + IsAvailableFor calls
+		float currentTime = timer / 1000.0f;
+		bool shouldUpdateProximity = _cachedProximityFacts.Count == 0 || (currentTime - _lastProximityUpdate) >= PROXIMITY_UPDATE_INTERVAL;
+
+		if (shouldUpdateProximity && Entity.TryGetComponent<TransformComponent2D>(out var agentTransform))
+		{
+			_cachedProximityFacts.Clear();
+			AddProximityAndAvailabilityFacts(_cachedProximityFacts, agentTransform, Entity, _cachedTargetTypes, _cachedTargetTypeStrings);
+			_lastProximityUpdate = currentTime;
+		}
+
+		// Merge cached proximity facts into current state
+		if (_cachedProximityFacts.Count > 0)
+		{
+			foreach (var kvp in _cachedProximityFacts)
+			{
+				facts[kvp.Key] = kvp.Value;
+			}
+		}
+
 
 		// Cache the state
 		float cacheTime = timer / 1000.0f;
@@ -335,23 +371,6 @@ public class AIGoalExecutor : IActiveComponent
 						}
 					}
 				}
-				// Also check for trees (which don't have TargetComponent)
-				else if (entity.Tags.Contains(Data.Tags.Tree))
-				{
-					// Only count alive trees
-					if (entity.TryGetComponent<HealthComponent>(out var health) && health.IsAlive)
-					{
-						for (int i = 0; i < cachedTargetTypes.Length; i++)
-						{
-							if (cachedTargetTypes[i] == TargetType.Tree)
-							{
-								if (isNear) hasNearby[i] = true;
-								if (isAvailable) availableCount[i]++;
-								break;
-							}
-						}
-					}
-				}
 			}
 		}
 
@@ -364,7 +383,7 @@ public class AIGoalExecutor : IActiveComponent
 		}
 	}
 
-	private static void AddNPCFacts(Dictionary<string, object> facts, WorldStateData worldData, NPCData npcData, TargetType[] cachedTargetTypes, string[] cachedTargetTypeStrings)
+	private static void AddNPCFacts(Dictionary<string, object> facts, NPCData npcData, TargetType[] cachedTargetTypes)
 	{
 		// Add agent inventory facts
 		// NOTE: WorldCount/WorldHas are now set by AddProximityAndAvailabilityFacts (reservation-aware)
