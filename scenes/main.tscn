@@ -9,7 +9,7 @@
 [node name="Game" type="Node2D"]
 script = ExtResource("1_0wfyh")
 DebugMode = true
-MaxTicksPerFrame = 15
+StartingScenario = "ManyFood"
 
 [node name="EntityManager" type="Node" parent="." node_paths=PackedStringArray("ViewRoot")]
 script = ExtResource("2_0wfyh")
@@ -23,6 +23,3 @@ script = ExtResource("4_jyhfs")
 
 [node name="NPCInspectorPanel" type="Node" parent="."]
 script = ExtResource("5_npc_inspector")
-Enabled = true
-UpdatesPerSecond = 10.0
-ClickRadius = 100.0

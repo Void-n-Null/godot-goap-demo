@@ -23,7 +23,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// <summary>
 	/// Maximum entities to prevent memory issues.
 	/// </summary>
-	private const int MAX_ENTITIES = 15000;
+	private const int MAX_ENTITIES = 500000;
 
 	public bool IsFull => _entities.Count >= MAX_ENTITIES;
 
