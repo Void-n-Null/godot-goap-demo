@@ -19,6 +19,10 @@ public static class FactKeys
     
     // Action state facts
     public static string TargetChopped(TargetType target) => $"{target}_Chopped";
+
+    // Social facts
+    public const string MateDesireSatisfied = "MateDesireSatisfied";
+    public const string NearMate = "NearMate";
     
     // Common facts
     public const string AgentId = "AgentId";

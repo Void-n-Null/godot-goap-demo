@@ -19,6 +19,7 @@ public class VisualComponent(string ScenePath = null) : IComponent
 
 	public Vector2? ScaleMultiplier { get; set; }
 	public Vector2 VisualOriginOffset { get; set; } = Vector2.Zero;
+	public float? ZBiasOverride { get; set; }
 	public bool YBasedZIndex { get; set; } = true;
 	public float ZIndexScale { get; set; } = 1f;
 	public int ZIndexOffset { get; set; } = 0;
@@ -61,10 +62,11 @@ public class VisualComponent(string ScenePath = null) : IComponent
 		var visualPosition = _transform2D.Position + VisualOriginOffset;
 		CustomEntityRenderEngineLocator.Renderer?.UpdateSprite(_id, visualPosition, _transform2D.Rotation, scale);
 		
-		// Update ZBias to compensate for visual offset, keeping Y-based sorting at entity's actual position
-		if (VisualOriginOffset != Vector2.Zero)
+		// Update ZBias to compensate for visual offset, or honor explicit override
+		float? zBias = ZBiasOverride ?? (VisualOriginOffset != Vector2.Zero ? -VisualOriginOffset.Y : null);
+		if (zBias.HasValue)
 		{
-			CustomEntityRenderEngineLocator.Renderer?.UpdateSpriteZBias(_id, -VisualOriginOffset.Y);
+			CustomEntityRenderEngineLocator.Renderer?.UpdateSpriteZBias(_id, zBias.Value);
 		}
 		
 		_transform2D.ClearDirty(TransformDirtyFlags.All);
@@ -99,7 +101,7 @@ public class VisualComponent(string ScenePath = null) : IComponent
 
 		var scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
 		var visualPosition = _transform2D.Position + VisualOriginOffset;
-		var zBias = -VisualOriginOffset.Y; // Compensate for visual offset to keep Y-based sorting at entity position
+		var zBias = ZBiasOverride ?? (VisualOriginOffset != Vector2.Zero ? -VisualOriginOffset.Y : 0f); // Compensate for offset or honor override
 
 		// Only add sprite if we have a valid texture
 		if (texture != null)

@@ -58,10 +58,14 @@ public static class NPC
         ],
         addMutators: [
             // Randomize starting hunger (0-80% so some NPCs start hungry)
-            EntityBlueprint.Mutate<NPCData>((npc) => npc.Hunger = Random.NextFloat(0f, 80f))
+            EntityBlueprint.Mutate<NPCData>((npc) =>
+            {
+                npc.Hunger = Random.NextFloat(0f, 80f);
+                npc.MatingDesire = Random.NextFloat(5f, 30f);
+            })
         ]
     );
-    private static string DetermineSpritePath(NPCData npcData)
+    public static string DetermineSpritePath(NPCData npcData)
     {
         var ageGroup = npcData?.AgeGroup ?? NPCAgeGroup.Adult;
         var gender = npcData?.Gender ?? NPCGender.Male;

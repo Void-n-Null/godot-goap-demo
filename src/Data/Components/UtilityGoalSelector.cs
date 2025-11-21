@@ -172,6 +172,7 @@ public class UtilityGoalSelector : IActiveComponent
 		// Register available goals
 		_availableGoals.Add(new EatFoodGoal());
 		_availableGoals.Add(new StayWarmGoal());
+		_availableGoals.Add(new FindMateGoal());
 		_availableGoals.Add(new IdleGoal());
 
 		GD.Print($"[{Entity.Name}] UtilityAI started with {_availableGoals.Count} goals");

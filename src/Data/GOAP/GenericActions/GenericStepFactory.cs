@@ -52,6 +52,7 @@ public class GenericStepFactory : IStepFactory
         RegisterConsumeFoodStep();
         RegisterBuildCampfireStep();
         RegisterIdleStep();
+        RegisterMateSteps();
     }
 
     private void RegisterMoveToTargetStep(TargetType type)
@@ -104,6 +105,37 @@ public class GenericStepFactory : IStepFactory
         };
 
         _stepConfigs.Add(config);
+    }
+
+    private void RegisterMateSteps()
+    {
+        var approach = new StepConfig("GoToMate")
+        {
+            ActionFactory = () => new MoveToMateAction(),
+            Preconditions = State.Empty(),
+            Effects = new List<(string, object)>
+            {
+                (FactKeys.NearMate, (FactValue)true)
+            },
+            CostFactory = _ => 5.0
+        };
+        _stepConfigs.Add(approach);
+
+        var matePre = State.Empty();
+        matePre.Set(FactKeys.NearMate, true);
+
+        var mate = new StepConfig("Mate")
+        {
+            ActionFactory = () => new MateAction(),
+            Preconditions = matePre,
+            Effects = new List<(string, object)>
+            {
+                (FactKeys.MateDesireSatisfied, (FactValue)true),
+                (FactKeys.NearMate, (FactValue)false)
+            },
+            CostFactory = _ => 1.0
+        };
+        _stepConfigs.Add(mate);
     }
 
     private void RegisterPickUpTargetStep(TargetType type)
