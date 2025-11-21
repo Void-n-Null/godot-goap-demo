@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Game.Data.Components;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace Game.Data;
 
@@ -16,6 +17,20 @@ public class Entity : IUpdatableEntity
 	/// Unique entity ID for component lookup and debugging.
 	/// </summary>
 	public Guid Id { get; } = Guid.NewGuid();
+
+	/// <summary>
+	/// Direct index into the SpatialQuadTree's internal element array.
+	/// Allows O(1) lookups for spatial updates, bypassing dictionary hashing.
+	/// -1 means not tracked.
+	/// </summary>
+	public int SpatialHandle { get; set; } = -1;
+
+	/// <summary>
+	/// ID of the agent that has reserved this entity.
+	/// Used for O(1) reservation checks without dictionary lookups.
+	/// Guid.Empty means not reserved.
+	/// </summary>
+	public Guid ReservedByAgentId { get; set; } = Guid.Empty;
 
 	/// <summary>
 	/// Human-readable name of the entity, usually from its blueprint.
@@ -76,9 +91,10 @@ public class Entity : IUpdatableEntity
 	public bool IsActive { get; set; } = true;
 
 	/// <summary>
-	/// Components attached to this entity.
+	/// Components attached to this entity, stored by Component ID.
+	/// Replaces dictionary for O(1) access.
 	/// </summary>
-	protected readonly Dictionary<Type, IComponent> _components = [];
+	protected IComponent[] _fastComponents = new IComponent[16];
 
 	/// <summary>
 	/// Active components that should receive per-frame updates.
@@ -106,17 +122,26 @@ public class Entity : IUpdatableEntity
 	/// <summary>
 	/// Gets a component of the specified type, or null if not found.
 	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public T GetComponent<T>() where T : class, IComponent
 	{
-		if (_components.TryGetValue(typeof(T), out var component))
+		// Fast path: Check the slot for T
+		int id = ComponentType<T>.Id;
+		if (id < _fastComponents.Length)
 		{
-			return (T)component;
+			var c = _fastComponents[id];
+			if (c is T match) return match;
 		}
 
+		// Optimization: If T is sealed, it cannot be in any other slot (no subclasses).
+		// So we can skip the fallback loop.
+		if (ComponentType<T>.IsSealed) return null;
+
 		// Polymorphic fallback: search for first component that implements T
-		foreach (var c in _components.Values)
+		var comps = _fastComponents;
+		for (int i = 0; i < comps.Length; i++)
 		{
-			if (c is T match) return match;
+			if (comps[i] is T match) return match;
 		}
 
 		return null;
@@ -126,18 +151,32 @@ public class Entity : IUpdatableEntity
 	/// Attempts to get a component of the specified type.
 	/// Returns true if found, false otherwise. The component is output via the out parameter.
 	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public bool TryGetComponent<T>(out T component) where T : class, IComponent
 	{
-		if (_components.TryGetValue(typeof(T), out var foundComponent))
+		// Fast path
+		int id = ComponentType<T>.Id;
+		if (id < _fastComponents.Length)
 		{
-			component = (T)foundComponent;
-			return true;
+			var c = _fastComponents[id];
+			if (c is T match)
+			{
+				component = match;
+				return true;
+			}
 		}
 
-		// Polymorphic fallback: search for first component that implements T
-		foreach (var c in _components.Values)
+		if (ComponentType<T>.IsSealed)
 		{
-			if (c is T match)
+			component = null;
+			return false;
+		}
+
+		// Polymorphic fallback
+		var comps = _fastComponents;
+		for (int i = 0; i < comps.Length; i++)
+		{
+			if (comps[i] is T match)
 			{
 				component = match;
 				return true;
@@ -149,60 +188,24 @@ public class Entity : IUpdatableEntity
 	}
 
 	/// <summary>
+	/// Ensures the fast component array can hold the given ID.
+	/// </summary>
+	private void EnsureCapacity(int id)
+	{
+		if (id >= _fastComponents.Length)
+		{
+			int newSize = Math.Max(id + 1, _fastComponents.Length * 2);
+			Array.Resize(ref _fastComponents, newSize);
+		}
+	}
+
+	/// <summary>
 	/// Adds or replaces a component using two-phase attachment.
-	/// Uses the component's runtime type for storage to avoid interface-type overwrites.
+	/// Uses the component's runtime type for storage.
 	/// </summary>
 	public void AddComponent<T>(T component) where T : IComponent
 	{
-		bool wasActive = HasActiveComponents;
-		var key = component.GetType();
-		if (_components.TryGetValue(key, out var existing))
-		{
-			// Invalidate caches before detaching
-			if (existing == _transform) _transform = null;
-			if (existing == _visual) _visual = null;
-
-			if (existing is IActiveComponent existingActive)
-			{
-				_activeComponents.Remove(existingActive);
-			}
-			existing.OnDetached();
-			existing.Entity = null;
-		}
-
-		_components[key] = component;
-		component.Entity = this;
-
-		// Update caches for known component types
-		if (component is TransformComponent2D addedTransform)
-		{
-			_transform = addedTransform;
-		}
-		else if (component is VisualComponent addedVisual)
-		{
-			_visual = addedVisual;
-		}
-
-		// Two-phase attachment for safe component initialization
-		component.OnPreAttached();
-
-		// If the entity is already initialized, complete attachment immediately
-		if (_isInitialized)
-		{
-			component.OnPostAttached();
-			if (component is IActiveComponent active)
-			{
-				_activeComponents.Add(active);
-			}
-			if (!wasActive && HasActiveComponents)
-			{
-				ActiveComponentsStateChanged?.Invoke(this, true);
-			}
-			else if (wasActive && !HasActiveComponents)
-			{
-				ActiveComponentsStateChanged?.Invoke(this, false);
-			}
-		}
+		AddComponent((IComponent)component);
 	}
 
 	/// <summary>
@@ -211,8 +214,13 @@ public class Entity : IUpdatableEntity
 	public void AddComponent(IComponent component)
 	{
 		bool wasActive = HasActiveComponents;
-		var key = component.GetType();
-		if (_components.TryGetValue(key, out var existing))
+		var type = component.GetType();
+		int id = ComponentRegistry.GetId(type);
+		
+		EnsureCapacity(id);
+
+		var existing = _fastComponents[id];
+		if (existing != null)
 		{
 			// Invalidate caches before detaching
 			if (existing == _transform) _transform = null;
@@ -226,7 +234,7 @@ public class Entity : IUpdatableEntity
 			existing.Entity = null;
 		}
 
-		_components[key] = component;
+		_fastComponents[id] = component;
 		component.Entity = this;
 		component.OnPreAttached();
 
@@ -265,10 +273,12 @@ public class Entity : IUpdatableEntity
 	private void CompleteAttachment()
 	{
 		bool wasActive = HasActiveComponents;
-		// Create a snapshot to avoid modification-during-iteration issues
-		var componentsSnapshot = _components.Values.ToArray();
-		foreach (var component in componentsSnapshot)
+		
+		for (int i = 0; i < _fastComponents.Length; i++)
 		{
+			var component = _fastComponents[i];
+			if (component == null) continue;
+
 			// Skip if component was removed during initialization
 			if (component.Entity != this) continue;
 
@@ -278,6 +288,7 @@ public class Entity : IUpdatableEntity
 				_activeComponents.Add(active);
 			}
 		}
+
 		if (!wasActive && HasActiveComponents)
 		{
 			ActiveComponentsStateChanged?.Invoke(this, true);
@@ -289,39 +300,60 @@ public class Entity : IUpdatableEntity
 	/// </summary>
 	public bool RemoveComponent<T>() where T : IComponent
 	{
-		bool wasActive = HasActiveComponents;
-		if (_components.TryGetValue(typeof(T), out var component))
+		int id = ComponentType<T>.Id;
+		
+		if (id < _fastComponents.Length && _fastComponents[id] != null)
 		{
-			// Invalidate caches for known component types BEFORE calling OnDetached
-			// to ensure consistency with AddComponent behavior
-			if (component == _transform) _transform = null;
-			if (component == _visual) _visual = null;
-
-			component.OnDetached();
-			component.Entity = null;
-			if (component is IActiveComponent active)
-			{
-				_activeComponents.Remove(active);
-			}
-			bool removed = _components.Remove(typeof(T));
-			if (wasActive && !HasActiveComponents)
-			{
-				ActiveComponentsStateChanged?.Invoke(this, false);
-			}
-			return removed;
+			return RemoveComponentInternal(id);
 		}
+		
 		return false;
+	}
+
+	private bool RemoveComponentInternal(int id)
+	{
+		var component = _fastComponents[id];
+		if (component == null) return false;
+
+		bool wasActive = HasActiveComponents;
+
+		// Invalidate caches for known component types BEFORE calling OnDetached
+		if (component == _transform) _transform = null;
+		if (component == _visual) _visual = null;
+
+		component.OnDetached();
+		component.Entity = null;
+		if (component is IActiveComponent active)
+		{
+			_activeComponents.Remove(active);
+		}
+		
+		_fastComponents[id] = null; // Clear slot
+
+		if (wasActive && !HasActiveComponents)
+		{
+			ActiveComponentsStateChanged?.Invoke(this, false);
+		}
+		return true;
 	}
 
 	/// <summary>
 	/// Checks if entity has a specific component.
 	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public bool HasComponent<T>() where T : IComponent
 	{
-		if (_components.ContainsKey(typeof(T))) return true;
-		foreach (var c in _components.Values)
+		// Fast path
+		int id = ComponentType<T>.Id;
+		if (id < _fastComponents.Length && _fastComponents[id] is T) return true;
+
+		if (ComponentType<T>.IsSealed) return false;
+
+		// Polymorphic fallback
+		var comps = _fastComponents;
+		for (int i = 0; i < comps.Length; i++)
 		{
-			if (c is T) return true;
+			if (comps[i] is T) return true;
 		}
 		return false;
 	}
@@ -331,22 +363,32 @@ public class Entity : IUpdatableEntity
 	/// </summary>
 	public IComponent GetComponent(Type componentType)
 	{
-		if (_components.TryGetValue(componentType, out var component))
+		// Optimistic check: get ID for this type
+		int id = ComponentRegistry.GetId(componentType);
+		if (id < _fastComponents.Length)
 		{
-			return component;
+			var c = _fastComponents[id];
+			if (c != null && componentType.IsAssignableFrom(c.GetType())) return c;
 		}
-		foreach (var c in _components.Values)
+
+		if (componentType.IsSealed) return null;
+
+		// Fallback
+		var comps = _fastComponents;
+		for (int i = 0; i < comps.Length; i++)
 		{
-			if (componentType.IsAssignableFrom(c.GetType())) return c;
+			var c = comps[i];
+			if (c != null && componentType.IsAssignableFrom(c.GetType())) return c;
 		}
 		return null;
 	}
 
 	public void OnStart()
 	{
-		foreach (var component in _components.Values)
+		var comps = _fastComponents;
+		for (int i = 0; i < comps.Length; i++)
 		{
-			component.OnStart();
+			comps[i]?.OnStart();
 		}
 	}
 
@@ -358,8 +400,10 @@ public class Entity : IUpdatableEntity
 	/// <summary>
 	/// Enumerates all components attached to this entity.
 	/// </summary>
-	public IEnumerable<IComponent> GetAllComponents() => _components.Values;
-
+	public IEnumerable<IComponent> GetAllComponents()
+	{
+		return _fastComponents.Where(c => c != null);
+	}
 
 	/// <summary>
 	/// Initializes the entity by completing the attachment of the components it was created with.
@@ -389,11 +433,15 @@ public class Entity : IUpdatableEntity
 	/// </summary>
 	public virtual void Destroy()
 	{
-		foreach (var component in _components.Values)
+		for (int i = 0; i < _fastComponents.Length; i++)
 		{
-			component.OnDetached();
+			var component = _fastComponents[i];
+			if (component != null)
+			{
+				component.OnDetached();
+				_fastComponents[i] = null;
+			}
 		}
-		_components.Clear();
 		_activeComponents.Clear();
 		_transform = null;
 		_visual = null;

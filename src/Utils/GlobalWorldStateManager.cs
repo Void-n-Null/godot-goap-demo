@@ -20,6 +20,8 @@ public class GlobalWorldStateManager
 	private WorldStateData _cachedWorldData;
 	private float _lastWorldDataUpdate;
 	private const float WORLD_DATA_UPDATE_INTERVAL = 0.5f; // Update world data every 500ms
+	private bool _worldDataDirty = true;
+	private bool _eventsHooked;
 	
 	// Cache enum values to avoid repeated allocations
 	private static readonly TargetType[] _cachedTargetTypes = (TargetType[])Enum.GetValues(typeof(TargetType));
@@ -35,7 +37,10 @@ public class GlobalWorldStateManager
 		}
 	}
 
-	private GlobalWorldStateManager() { }
+	private GlobalWorldStateManager()
+	{
+		HookWorldEvents();
+	}
 
 	/// <summary>
 	/// Gets the cached world state data. Automatically refreshes if expired.
@@ -44,7 +49,7 @@ public class GlobalWorldStateManager
 	{
 		float currentTime = Time.GetTicksMsec() / 1000.0f;
 		
-		if (_cachedWorldData == null || currentTime - _lastWorldDataUpdate > WORLD_DATA_UPDATE_INTERVAL)
+		if (_cachedWorldData == null || _worldDataDirty || currentTime - _lastWorldDataUpdate > WORLD_DATA_UPDATE_INTERVAL)
 		{
 			UpdateWorldData();
 			_lastWorldDataUpdate = currentTime;
@@ -60,6 +65,19 @@ public class GlobalWorldStateManager
 	{
 		UpdateWorldData();
 		_lastWorldDataUpdate = Time.GetTicksMsec() / 1000.0f;
+	}
+
+	private void HookWorldEvents()
+	{
+		if (_eventsHooked) return;
+		_eventsHooked = true;
+		WorldEventBus.Instance.EntitySpawned += OnWorldEntityChanged;
+		WorldEventBus.Instance.EntityDespawned += OnWorldEntityChanged;
+	}
+
+	private void OnWorldEntityChanged(Entity entity)
+	{
+		_worldDataDirty = true;
 	}
 
 	private void UpdateWorldData()
@@ -133,6 +151,7 @@ public class GlobalWorldStateManager
 		// Store tree count
 		_cachedWorldData.EntityCounts["Tree"] = treeCount;
 		_cachedWorldData.AvailabilityFlags["TreeAvailable"] = treeCount > 0;
+		_worldDataDirty = false;
 	}
 }
 

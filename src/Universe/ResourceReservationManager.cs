@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using Game.Data;
 using Godot;
+using System.Runtime.CompilerServices;
 
 namespace Game.Universe;
 
@@ -51,6 +52,9 @@ public class ResourceReservationManager
             return false; // Reserved by someone else
         }
 
+        // Successfully reserved in dict, update Entity cache
+        resource.ReservedByAgentId = agentId;
+
         // Successfully reserved - update agent tracking (this still needs lock since HashSet isn't thread-safe)
         lock (_lock)
         {
@@ -81,6 +85,7 @@ public class ResourceReservationManager
         if (_reservations.TryGetValue(resourceId, out var reservedBy) && reservedBy == agentId)
         {
             _reservations.TryRemove(resourceId, out _);
+            resource.ReservedByAgentId = Guid.Empty; // Clear cache
 
             // Update agent tracking (still needs lock for HashSet)
             lock (_lock)
@@ -109,7 +114,36 @@ public class ResourceReservationManager
                 // OPTIMIZED: Remove from ConcurrentDictionary without holding lock for each removal
                 foreach (var resourceId in reservedResources)
                 {
-                    _reservations.TryRemove(resourceId, out _);
+                    if (_reservations.TryRemove(resourceId, out _))
+                    {
+                        // We can't easily clear ReservedByAgentId on the entity instance here
+                        // because we only have the Guid.
+                        // However, this method is typically called on death or cleanup.
+                        // The dictionary is the ground truth. 
+                        // If IsAvailableFor checks the Entity field, it might see a stale reservation 
+                        // if we don't clear it.
+                        
+                        // BUT, getting the Entity by ID is slow.
+                        // If the entity is still alive, this is a problem.
+                        // If the entity is dead, it doesn't matter.
+                        
+                        // Ideally we should look up the entity.
+                        // For now, we accept the dictionary handles the logic correctness, 
+                        // but the field is for speed.
+                        // To be safe: IsAvailableFor should strictly trust the field only if it matches?
+                        // No, IsAvailableFor is the hot path.
+                        
+                        // If we can't clear the field, we have a stale "Reserved" state on the resource entity.
+                        // That resource will appear reserved by 'agent' (who released it).
+                        // If 'agent' is dead, it's permanently reserved? That's BAD.
+                        
+                        // We MUST clear the field.
+                        var ent = EntityManager.Instance?.GetEntityById(resourceId);
+                        if (ent != null)
+                        {
+                            ent.ReservedByAgentId = Guid.Empty;
+                        }
+                    }
                 }
                 reservedResources.Clear();
                 GD.Print($"[Reservation] {agent.Name} released all reservations");
@@ -126,7 +160,10 @@ public class ResourceReservationManager
         if (resource == null)
             return false;
 
-        // OPTIMIZED: No lock needed - ConcurrentDictionary.ContainsKey is thread-safe
+        // Fast path
+        if (resource.ReservedByAgentId != Guid.Empty) return true;
+
+        // Fallback to dict? (Should remain synced)
         return _reservations.ContainsKey(resource.Id);
     }
 
@@ -139,31 +176,33 @@ public class ResourceReservationManager
         if (resource == null || agent == null)
             return false;
 
-        // OPTIMIZED: No lock needed - ConcurrentDictionary.TryGetValue is thread-safe
+        // Fast path
+        if (resource.ReservedByAgentId == agent.Id) return true;
+
         return _reservations.TryGetValue(resource.Id, out var reservedBy) && reservedBy == agent.Id;
     }
 
     /// <summary>
     /// Check if a resource is available (not reserved or reserved by this agent)
-    /// OPTIMIZED: Lock-free read using ConcurrentDictionary (HOT PATH - called 100+ times per frame per agent)
+    /// OPTIMIZED: Lock-free read using cached Entity field (HOT PATH)
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsAvailableFor(Entity resource, Entity agent)
     {
         if (resource == null)
             return false;
 
-        var resourceId = resource.Id;
+        // HOT PATH OPTIMIZATION:
+        // Check cached field directly.
+        // If ReservedByAgentId is Empty -> Available.
+        // If ReservedByAgentId matches agent.Id -> Available (we own it).
+        // If ReservedByAgentId matches someone else -> Unavailable.
+        
+        var reservedBy = resource.ReservedByAgentId;
+        if (reservedBy == Guid.Empty) return true;
+        
+        if (agent != null && reservedBy == agent.Id) return true;
 
-        // OPTIMIZED: No lock needed - ConcurrentDictionary.TryGetValue is thread-safe
-        // Not reserved = available
-        if (!_reservations.TryGetValue(resourceId, out var reservedBy))
-            return true;
-
-        // Reserved by this agent = available
-        if (agent != null && reservedBy == agent.Id)
-            return true;
-
-        // Reserved by someone else = not available
         return false;
     }
 
@@ -176,28 +215,16 @@ public class ResourceReservationManager
         if (resources == null || results == null)
             return;
 
-        // No lock needed - we're just doing reads with ConcurrentDictionary
-        var agentId = agent?.Id;
+        var agentId = agent?.Id ?? Guid.Empty;
         foreach (var resource in resources)
         {
-            if (resource == null)
-                continue;
+            if (resource == null) continue;
 
-            var resourceId = resource.Id;
-
-            // Not reserved = available
-            if (!_reservations.TryGetValue(resourceId, out var reservedBy))
-            {
-                results.Add(resource);
-                continue;
-            }
-
-            // Reserved by this agent = available
-            if (agentId.HasValue && reservedBy == agentId.Value)
+            var reservedBy = resource.ReservedByAgentId;
+            if (reservedBy == Guid.Empty || reservedBy == agentId)
             {
                 results.Add(resource);
             }
-            // Reserved by someone else = skip
         }
     }
 }

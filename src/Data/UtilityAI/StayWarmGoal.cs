@@ -9,6 +9,10 @@ namespace Game.Data.UtilityAI;
 
 public class StayWarmGoal : IUtilityGoal
 {
+    private const float ComfortableTemperature = 70f;
+    private const float CriticalTemperature = 30f;
+    private const float WarmthRadius = 150f;
+
     public string Name => "Stay Warm";
     
     public float CalculateUtility(Entity agent)
@@ -16,53 +20,59 @@ public class StayWarmGoal : IUtilityGoal
         if (!agent.TryGetComponent<NPCData>(out var npcData))
             return 0f;
         
-        // Check if agent is already near a campfire (heat source)
-        if (agent.TryGetComponent<TransformComponent2D>(out var transform))
+        float temp = npcData.Temperature;
+        float coldFactor = Mathf.Clamp((ComfortableTemperature - temp) / ComfortableTemperature, 0f, 1f);
+        if (coldFactor <= 0.01f)
+            return 0f; // already warm enough
+
+        float utility = 0.2f + coldFactor * 0.6f;
+
+        if (temp < CriticalTemperature)
         {
-            const float WARMTH_RADIUS = 150f;
-
-            // Use predicate in spatial query to avoid LINQ allocations
-            var nearbyCampfires = Universe.EntityManager.Instance.SpatialPartition
-                .QueryCircle(transform.Position, WARMTH_RADIUS,
-                    e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Campfire,
-                    maxResults: 1);
-
-            // If near a campfire, warmth is not a priority
-            if (nearbyCampfires != null && nearbyCampfires.Count > 0)
-                return 0f;
+            utility += 0.2f; // panic bonus when dangerously cold
         }
-        
-        // Warmth need increases over time (for demo - in reality you'd track temperature)
-        // For now, give it moderate priority if agent has enough resources
-        // This makes it a long-term goal - gather wood for campfire
-        
-        int currentSticks = npcData.Resources.TryGetValue(TargetType.Stick, out var sticks) ? sticks : 0;
-        
-        // Linear growth from 0.3 with 0 sticks to 0.5 with 16 sticks
-        float utility = 0.3f + (currentSticks / 16f) * 0.2f;
-        return Mathf.Clamp(utility, 0.3f, 0.5f);
+
+        if (npcData.Resources.TryGetValue(TargetType.Stick, out var sticks))
+        {
+            utility += Mathf.Clamp(sticks / 4f, 0f, 1f) * 0.1f; // more sticks = easier to build fire
+        }
+
+        if (IsNearCampfire(agent))
+        {
+            // Being near a fire already satisfies the positional goal; reduced urgency keeps the plan active
+            utility *= 0.4f;
+        }
+
+        return Mathf.Clamp(utility, 0f, 1f);
     }
     
     public State GetGoalState(Entity agent)
     {
-        // Goal: Be near a campfire for warmth
-        return new State(new Dictionary<string, object> 
-        { 
-            { FactKeys.NearTarget(TargetType.Campfire), true }
-        });
+        // Goal: be near a campfire so temperature can rise
+        var s = new State();
+        s.Set(FactKeys.NearTarget(TargetType.Campfire), true);
+        return s;
     }
     
     public bool IsSatisfied(Entity agent)
     {
-        // Satisfied when agent is near a campfire
+        // Once we've reached a campfire or we're fully warmed up, this goal is satisfied.
+        if (IsNearCampfire(agent))
+            return true;
+
+        if (agent.TryGetComponent<NPCData>(out var npcData) && npcData.Temperature >= ComfortableTemperature)
+            return true;
+
+        return false;
+    }
+
+    private static bool IsNearCampfire(Entity agent)
+    {
         if (!agent.TryGetComponent<TransformComponent2D>(out var transform))
             return false;
 
-        const float WARMTH_RADIUS = 150f;
-
-        // Use predicate in spatial query to avoid LINQ allocations
         var nearbyCampfires = Universe.EntityManager.Instance.SpatialPartition
-            .QueryCircle(transform.Position, WARMTH_RADIUS,
+            .QueryCircle(transform.Position, WarmthRadius,
                 e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Campfire,
                 maxResults: 1);
 

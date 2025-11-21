@@ -1,7 +1,9 @@
 using System.Linq;
+using Game.Data;
 using Game.Data.Components;
 using Game.Universe;
 using Godot;
+using Game.Utils;
 
 namespace Game.Data.GOAP.GenericActions;
 
@@ -9,23 +11,20 @@ namespace Game.Data.GOAP.GenericActions;
 /// Special action to build a campfire at the agent's current location.
 /// Doesn't require finding an entity - creates one instead.
 /// </summary>
-public sealed class BuildCampfireAction : IAction, IRuntimeGuard
+public sealed class BuildCampfireAction(int sticksRequired = 16, float buildTime = 3.0f) : PeriodicGuardAction(0.2f)
 {
-    private readonly int _sticksRequired;
-    private readonly float _buildTime;
+    private readonly int _sticksRequired = sticksRequired;
+    private readonly float _buildTime = buildTime;
     private float _timer;
     private bool _failed;
     private bool _completed;
 
-    public string Name => "BuildCampfire";
+    private const float CAMPFIRE_ABORT_RADIUS = 1000f;
 
-    public BuildCampfireAction(int sticksRequired = 16, float buildTime = 3.0f)
-    {
-        _sticksRequired = sticksRequired;
-        _buildTime = buildTime;
-    }
 
-    public void Enter(Entity agent)
+    public override string Name => "BuildCampfire";
+
+    public override void Enter(Entity agent)
     {
         _timer = 0f;
         _completed = false;
@@ -45,10 +44,16 @@ public sealed class BuildCampfireAction : IAction, IRuntimeGuard
             return;
         }
 
+        if (HasCampfireNearby(agent))
+        {
+            Fail("Existing campfire already nearby; no need to build another.");
+            return;
+        }
+
         GD.Print($"[{agent.Name}] BuildCampfire: Starting construction (duration: {_buildTime}s, cost: {_sticksRequired} sticks)");
     }
 
-    public ActionStatus Update(Entity agent, float dt)
+    public override ActionStatus Update(Entity agent, float dt)
     {
         if (_failed) return ActionStatus.Failed;
         if (_completed) return ActionStatus.Succeeded;
@@ -89,7 +94,7 @@ public sealed class BuildCampfireAction : IAction, IRuntimeGuard
         return ActionStatus.Running;
     }
 
-    public void Exit(Entity agent, ActionExitReason reason)
+    public override void Exit(Entity agent, ActionExitReason reason)
     {
         if (reason != ActionExitReason.Completed)
         {
@@ -97,9 +102,22 @@ public sealed class BuildCampfireAction : IAction, IRuntimeGuard
         }
     }
 
-    public bool StillValid(Entity agent)
+    public override bool StillValid(Entity agent)
     {
         if (_failed) return false;
+
+        bool guardResult = EvaluateGuardPeriodically(agent, () =>
+        {
+            if (HasCampfireNearby(agent))
+            {
+                GD.Print($"[{agent.Name}] BuildCampfire aborted - campfire already nearby.");
+                return false;
+            }
+            return true;
+        });
+
+        if (!guardResult)
+            return false;
 
         // Check if agent still has enough sticks
         if (agent.TryGetComponent<NPCData>(out var npcData))
@@ -111,9 +129,23 @@ public sealed class BuildCampfireAction : IAction, IRuntimeGuard
         return false;
     }
 
-    public void Fail(string reason)
+    public override void Fail(string reason)
     {
         GD.PushError($"BuildCampfire fail: {reason}");
         _failed = true;
+    }
+
+    private static bool HasCampfireNearby(Entity agent)
+    {
+        if (!agent.TryGetComponent<TransformComponent2D>(out var transform))
+            return false;
+
+        var nearbyCampfire = EntityManager.Instance?.SpatialPartition?.QueryCircle(
+            transform.Position,
+            CAMPFIRE_ABORT_RADIUS,
+            e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Campfire,
+            maxResults: 1);
+
+        return nearbyCampfire != null && nearbyCampfire.Count > 0;
     }
 }

@@ -15,6 +15,8 @@ public static class Campfire
             new FireVisualComponent(
                 flameTexturePath: "res://textures/Flame.png",
                 intensity: 1.2f,
+                scaleMultiplier: new Vector2(0.3f, 0.2f),
+                visualOffset: new Vector2(-5f, -20f),
                 startActive: true
             )
         ]

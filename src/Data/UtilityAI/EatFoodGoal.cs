@@ -23,20 +23,15 @@ public class EatFoodGoal : IUtilityGoal
             return 0f;
         
         // Exponential curve - becomes VERY important as hunger increases
-        // At 30% hunger: ~0.2 utility
-        // At 50% hunger: ~0.5 utility
-        // At 80% hunger: ~0.9 utility
-        // At 100% hunger: 1.0 utility (max priority!)
         return Mathf.Pow(hungerRatio, 2f);
     }
     
     public State GetGoalState(Entity agent)
     {
-        // Goal: Have food consumed (hunger reduced)
-        return new State(new Dictionary<string, object> 
-        { 
-            { "FoodConsumed", true }
-        });
+        // Goal: Hunger satisfied
+        var s = new State();
+        s.Set("IsHungry", false);
+        return s;
     }
     
     public bool IsSatisfied(Entity agent)

@@ -11,16 +11,18 @@ public class StepConfig
 {
     public string Name { get; set; }
     public Func<IAction> ActionFactory { get; set; }
-    public Dictionary<string, object> Preconditions { get; set; }
-    public Dictionary<string, object> Effects { get; set; }
-    public Func<State, double> CostFactory { get; set; }
+    
+    // Changed to State
+    public State Preconditions { get; set; } = State.Empty();
+    
+    // Changed to List
+    public List<(string Key, object Value)> Effects { get; set; } = new();
+    
+    public Func<State, double> CostFactory { get; set; } = _ => 1.0;
 
     public StepConfig(string name)
     {
         Name = name;
-        Preconditions = new Dictionary<string, object>();
-        Effects = new Dictionary<string, object>();
-        CostFactory = _ => 1.0;
     }
 }
 
@@ -40,43 +42,65 @@ public class GenericStepFactory : IStepFactory
 
     private void RegisterAllSteps()
     {
-        // For each target type, create movement and interaction steps
         foreach (TargetType type in Enum.GetValues<TargetType>())
         {
             RegisterMoveToTargetStep(type);
             RegisterPickUpTargetStep(type);
         }
 
-        // Specialized steps
         RegisterChopTreeStep();
         RegisterConsumeFoodStep();
         RegisterBuildCampfireStep();
+        RegisterIdleStep();
     }
 
     private void RegisterMoveToTargetStep(TargetType type)
     {
+        var pre = State.Empty();
+        pre.Set(FactKeys.WorldHas(type), true);
+
+        var effects = new List<(string, object)>
+        {
+            (FactKeys.NearTarget(type), (FactValue)true)
+        };
+
+        bool requiresExclusiveUse = type != TargetType.Campfire;
+
         var config = new StepConfig($"GoTo_{type}")
         {
             ActionFactory = () => new MoveToEntityAction(
-                EntityFinderConfig.ByTargetType(type, radius: 5000f, requireUnreserved: true, shouldReserve: true),
+                EntityFinderConfig.ByTargetType(
+                    type,
+                    radius: 5000f,
+                    requireUnreserved: requiresExclusiveUse,
+                    shouldReserve: requiresExclusiveUse),
                 reachDistance: 64f,
                 actionName: $"GoTo_{type}"
             ),
-            Preconditions = new Dictionary<string, object>
-            {
-                { FactKeys.WorldHas(type), true }
-            },
-            Effects = new Dictionary<string, object>
-            {
-                { FactKeys.NearTarget(type), true }
-            },
+            Preconditions = pre,
+            Effects = effects,
             CostFactory = ctx =>
             {
-                // Use distance from state if available
-                if (ctx.Facts.TryGetValue($"Distance_To_{type}", out var distObj) && distObj is double dist)
-                    return dist / 100.0;
-                return 10.0; // Default cost
+                if (ctx.TryGet($"Distance_To_{type}", out var distObj))
+                    return distObj.FloatValue / 100.0;
+                return 10.0;
             }
+        };
+
+        _stepConfigs.Add(config);
+    }
+
+    private void RegisterIdleStep()
+    {
+        var config = new StepConfig("IdleAround")
+        {
+            ActionFactory = () => new IdleAction(durationSeconds: 1.0f),
+            Preconditions = State.Empty(),
+            Effects = new List<(string, object)>
+            {
+                ("IsIdle", (FactValue)true)
+            },
+            CostFactory = _ => 0.1f
         };
 
         _stepConfigs.Add(config);
@@ -84,9 +108,32 @@ public class GenericStepFactory : IStepFactory
 
     private void RegisterPickUpTargetStep(TargetType type)
     {
-        // Filter to pickup-able targets only (not trees to chop, beds to use, campfires, etc.)
         if (type == TargetType.Tree || type == TargetType.Bed || type == TargetType.Campfire) 
             return;
+
+        var pre = State.Empty();
+        pre.Set(FactKeys.WorldHas(type), true);
+        pre.Set(FactKeys.NearTarget(type), true);
+
+        var effects = new List<(string, object)>
+        {
+            (FactKeys.AgentCount(type), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.AgentCount(type), out var invObj))
+                    return invObj.IntValue + 1;
+                return 1;
+            })),
+            (FactKeys.AgentHas(type), (FactValue)true),
+            (FactKeys.WorldCount(type), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(type), out var worldObj))
+                    return Math.Max(0, worldObj.IntValue - 1);
+                return 0;
+            })),
+            (FactKeys.WorldHas(type), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(type), out var worldObj))
+                    return worldObj.IntValue - 1 > 0;
+                return false;
+            }))
+        };
 
         var config = new StepConfig($"PickUp_{type}")
         {
@@ -94,46 +141,18 @@ public class GenericStepFactory : IStepFactory
                 new EntityFinderConfig
                 {
                     Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == type,
-                    SearchRadius = 128f, // Should be nearby from movement step
-                    // ✅ FIXED: Only target unreserved items or items reserved by us
-                    RequireUnreserved = true,   // IsAvailableFor returns true for unreserved OR reserved by us
-                    RequireReservation = false, // Don't require pre-existing reservation
-                    ShouldReserve = true        // Reserve it ourselves when we start
+                    SearchRadius = 128f,
+                    RequireUnreserved = true,
+                    RequireReservation = false,
+                    ShouldReserve = true
                 },
                 interactionTime: 0.5f,
                 InteractionEffectConfig.PickUp(type),
                 actionName: $"PickUp_{type}"
             ),
-            Preconditions = new Dictionary<string, object>
-            {
-                { FactKeys.WorldHas(type), true },  // World must have this resource
-                { FactKeys.NearTarget(type), true }  // Agent must be near it
-            },
-            Effects = new Dictionary<string, object>
-            {
-                // Increment agent's inventory
-                { FactKeys.AgentCount(type), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.AgentCount(type), out var invObj) && invObj is int inv)
-                        return inv + 1;
-                    return 1;
-                }) },
-                // Mark agent as having this resource type
-                { FactKeys.AgentHas(type), true },
-                // Decrement world count
-                { FactKeys.WorldCount(type), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(type), out var worldObj) && worldObj is int world)
-                        return Math.Max(0, world - 1);
-                    return 0;
-                }) },
-                // Update world availability
-                { FactKeys.WorldHas(type), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(type), out var worldObj) && worldObj is int world)
-                        return world - 1 > 0;
-                    return false;
-                }) }
-                // NOTE: Don't set Near_X to false - multiple items can be at same location
-            },
-            CostFactory = _ => 0.5 // Quick pick up
+            Preconditions = pre,
+            Effects = effects,
+            CostFactory = _ => 0.5
         };
 
         _stepConfigs.Add(config);
@@ -142,7 +161,38 @@ public class GenericStepFactory : IStepFactory
     private void RegisterChopTreeStep()
     {
         var targetType = TargetType.Tree;
-        var producedType = TargetType.Stick; // Trees produce sticks
+        var producedType = TargetType.Stick;
+
+        var pre = State.Empty();
+        pre.Set(FactKeys.NearTarget(targetType), true);
+        pre.Set(FactKeys.WorldHas(targetType), true);
+
+        var effects = new List<(string, object)>
+        {
+            (FactKeys.TargetChopped(targetType), (FactValue)true),
+            (FactKeys.WorldHas(producedType), (FactValue)true),
+            
+            (FactKeys.WorldCount(producedType), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(producedType), out var wObj))
+                    return wObj.IntValue + 4;
+                return 4;
+            })),
+            
+            (FactKeys.WorldCount(targetType), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(targetType), out var tObj))
+                    return Math.Max(0, tObj.IntValue - 1);
+                return 0;
+            })),
+            
+            (FactKeys.WorldHas(targetType), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(targetType), out var tObj))
+                    return tObj.IntValue - 1 > 0;
+                return false;
+            })),
+            
+            (FactKeys.NearTarget(targetType), (FactValue)false),
+            (FactKeys.NearTarget(producedType), (FactValue)true)
+        };
 
         var config = new StepConfig("ChopTree")
         {
@@ -150,52 +200,16 @@ public class GenericStepFactory : IStepFactory
                 new EntityFinderConfig
                 {
                     Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Tree,
-                    SearchRadius = 128f, // Should be nearby from movement step
-                    // ✅ Take ownership of reservation from GoTo_Tree to prevent leaks
+                    SearchRadius = 128f,
                     RequireReservation = false,
-                    ShouldReserve = true  // Re-reserve (idempotent if already reserved by us)
+                    ShouldReserve = true
                 },
                 interactionTime: 3.0f,
                 InteractionEffectConfig.Kill(),
                 actionName: "Chop"
             ),
-            Preconditions = new Dictionary<string, object>
-            {
-                { FactKeys.NearTarget(targetType), true },  // Must be near tree
-                { FactKeys.WorldHas(targetType), true }     // Tree must exist
-            },
-            Effects = new Dictionary<string, object>
-            {
-                { FactKeys.TargetChopped(targetType), true }, // You chopped a tree
-                { FactKeys.WorldHas(producedType), true },  // Sticks now available
-                
-                // Add 4 sticks to world
-                { FactKeys.WorldCount(producedType), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(producedType), out var wObj) && wObj is int w)
-                        return w + 4;
-                    return 4;
-                }) },
-                
-                // Decrement tree count
-                { FactKeys.WorldCount(targetType), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(targetType), out var tObj) && tObj is int t)
-                        return Math.Max(0, t - 1);
-                    return 0;
-                }) },
-                
-                // Update tree availability
-                { FactKeys.WorldHas(targetType), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(targetType), out var tObj) && tObj is int t)
-                        return t - 1 > 0;
-                    return false;
-                }) },
-                
-                // Tree is destroyed, so agent is no longer near it
-                { FactKeys.NearTarget(targetType), false },
-                
-                // But sticks dropped at this location, so agent IS near sticks now
-                { FactKeys.NearTarget(producedType), true }
-            },
+            Preconditions = pre,
+            Effects = effects,
             CostFactory = _ => 3.0
         };
 
@@ -204,42 +218,46 @@ public class GenericStepFactory : IStepFactory
 
     private void RegisterConsumeFoodStep()
     {
+        var pre = State.Empty();
+        pre.Set(FactKeys.NearTarget(TargetType.Food), true);
+        pre.Set(FactKeys.WorldHas(TargetType.Food), true);
+        pre.Set("IsHungry", true);
+
+        var effects = new List<(string, object)>
+        {
+            ("IsHungry", (FactValue)false),
+            
+            (FactKeys.WorldCount(TargetType.Food), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(TargetType.Food), out var wObj))
+                    return Math.Max(0, wObj.IntValue - 1);
+                return 0;
+            })),
+
+            (FactKeys.WorldHas(TargetType.Food), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(TargetType.Food), out var wObj))
+                    return wObj.IntValue - 1 > 0;
+                return false;
+            })),
+
+            (FactKeys.NearTarget(TargetType.Food), (FactValue)false)
+        };
+
         var config = new StepConfig("ConsumeFood")
         {
             ActionFactory = () => new TimedInteractionAction(
                 new EntityFinderConfig
                 {
                     Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Food,
-                    SearchRadius = 128f, // Should be nearby from movement step
-                    // ✅ Take ownership of reservation from GoTo_Food to prevent leaks
+                    SearchRadius = 128f,
                     RequireReservation = false,
-                    ShouldReserve = true  // Re-reserve (idempotent if already reserved by us)
+                    ShouldReserve = true
                 },
                 interactionTime: 2.0f,
                 InteractionEffectConfig.ConsumeFood(),
                 actionName: "ConsumeFood"
             ),
-            Preconditions = new Dictionary<string, object>
-            {
-                { FactKeys.NearTarget(TargetType.Food), true },
-                { FactKeys.WorldHas(TargetType.Food), true }
-            },
-            Effects = new Dictionary<string, object>
-            {
-                { "FoodConsumed", true }, // Goal satisfaction fact
-                { FactKeys.WorldHas(TargetType.Food), (Func<State, object>)(ctx => {
-                    // Food might still exist if there are more
-                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(TargetType.Food), out var countObj) && countObj is int foodCount)
-                        return foodCount - 1 > 0;
-                    return false;
-                })},
-                { FactKeys.WorldCount(TargetType.Food), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(TargetType.Food), out var countObj) && countObj is int foodCount)
-                        return Math.Max(0, foodCount - 1);
-                    return 0;
-                })},
-                { FactKeys.NearTarget(TargetType.Food), false } // No longer near food (it's consumed)
-            },
+            Preconditions = pre,
+            Effects = effects,
             CostFactory = _ => 2.0
         };
 
@@ -248,46 +266,34 @@ public class GenericStepFactory : IStepFactory
 
     private void RegisterBuildCampfireStep()
     {
-        const int STICKS_REQUIRED = 16;
+        var pre = State.Empty();
+        pre.Set(FactKeys.AgentHas(TargetType.Stick), true);
+        pre.Set(FactKeys.AgentCount(TargetType.Stick), 2); 
+        
+        var effects = new List<(string, object)>
+        {
+            ("HasCampfire", (FactValue)true),
+            (FactKeys.WorldHas(TargetType.Campfire), (FactValue)true),
+            (FactKeys.NearTarget(TargetType.Campfire), (FactValue)true),
+            (FactKeys.WorldCount(TargetType.Campfire), (Func<State, FactValue>)(ctx =>
+            {
+                if (ctx.TryGet(FactKeys.WorldCount(TargetType.Campfire), out var existing))
+                    return existing.IntValue + 1;
+                return 1;
+            })),
+             (FactKeys.AgentCount(TargetType.Stick), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.AgentCount(TargetType.Stick), out var c))
+                    return Math.Max(0, c.IntValue - 2);
+                return 0;
+            }))
+        };
 
         var config = new StepConfig("BuildCampfire")
         {
-            ActionFactory = () => new BuildCampfireAction(
-                sticksRequired: STICKS_REQUIRED,
-                buildTime: 3.0f
-            ),
-            Preconditions = new Dictionary<string, object>
-            {
-                { FactKeys.AgentCount(TargetType.Stick), STICKS_REQUIRED }, // Need 16 sticks
-                // Don't require WorldHas(Campfire) = false, as building another is fine
-            },
-            Effects = new Dictionary<string, object>
-            {
-                { FactKeys.WorldHas(TargetType.Campfire), true }, // Campfire now exists
-                { FactKeys.NearTarget(TargetType.Campfire), true }, // Agent is near the campfire they just built
-                
-                // Deduct sticks from inventory
-                { FactKeys.AgentCount(TargetType.Stick), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.AgentCount(TargetType.Stick), out var invObj) && invObj is int inv)
-                        return Math.Max(0, inv - STICKS_REQUIRED);
-                    return 0;
-                }) },
-                
-                // Update has sticks flag
-                { FactKeys.AgentHas(TargetType.Stick), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.AgentCount(TargetType.Stick), out var invObj) && invObj is int inv)
-                        return (inv - STICKS_REQUIRED) > 0;
-                    return false;
-                }) },
-                
-                // Increment world campfire count
-                { FactKeys.WorldCount(TargetType.Campfire), (Func<State, object>)(ctx => {
-                    if (ctx.Facts.TryGetValue(FactKeys.WorldCount(TargetType.Campfire), out var wObj) && wObj is int w)
-                        return w + 1;
-                    return 1;
-                }) }
-            },
-            CostFactory = _ => 3.0 // 3 seconds to build
+            ActionFactory = () => new BuildCampfireAction(sticksRequired: 2, buildTime: 5.0f),
+            Preconditions = pre,
+            Effects = effects,
+            CostFactory = _ => 10.0
         };
 
         _stepConfigs.Add(config);
@@ -296,18 +302,10 @@ public class GenericStepFactory : IStepFactory
     public List<Step> CreateSteps(State initialState)
     {
         var steps = new List<Step>();
-
         foreach (var config in _stepConfigs)
         {
-            var step = new Step(
-                actionFactory: config.ActionFactory,
-                preconditions: config.Preconditions,
-                effects: config.Effects,
-                costFactory: config.CostFactory
-            );
-            steps.Add(step);
+            steps.Add(new Step(config.ActionFactory, config.Preconditions, config.Effects, config.CostFactory));
         }
-
         return steps;
     }
 }

@@ -16,7 +16,7 @@ public enum TargetType
     // Add more interactables as needed, e.g., Fire for burning, NPC for following
 }
 
-public class TargetComponent(TargetType targetType = TargetType.Stick) : IComponent
+public sealed class TargetComponent(TargetType targetType = TargetType.Stick) : IComponent
 {
     public TargetType Target { get; set; } = TargetType.Stick;
 
@@ -26,6 +26,11 @@ public class TargetComponent(TargetType targetType = TargetType.Stick) : ICompon
     {
         Target = targetType;
     }
+
+    public void OnPostAttached() { }
+    public void OnStart() { }
+    public void OnDetached() { }
+    public void Update(double delta) { }
 }
 
 public enum ResourceType

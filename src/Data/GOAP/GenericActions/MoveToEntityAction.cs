@@ -10,29 +10,22 @@ namespace Game.Data.GOAP.GenericActions;
 /// Generic action to move to an entity matching specified criteria.
 /// Replaces GoToFoodAction, GoToTargetAction, and similar movement actions.
 /// </summary>
-public sealed class MoveToEntityAction : IAction, IRuntimeGuard
+public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float reachDistance = 64f, string actionName = "MoveToEntity") : PeriodicGuardAction(0.5f)
 {
-    private readonly EntityFinderConfig _finderConfig;
-    private readonly float _reachDistance;
-    private readonly string _actionName;
+    private readonly EntityFinderConfig _finderConfig = finderConfig;
+    private readonly float _reachDistance = reachDistance;
+    private readonly string _actionName = actionName;
     
     private Entity _targetEntity;
     private NPCMotorComponent _motor;
     private bool _failed;
     private bool _arrived;
 
-    public string Name => _actionName;
+    public override string Name => _actionName;
 
-    public MoveToEntityAction(EntityFinderConfig finderConfig, float reachDistance = 64f, string actionName = "MoveToEntity")
+    public override void Enter(Entity agent)
     {
-        _finderConfig = finderConfig;
-        _reachDistance = reachDistance;
-        _actionName = actionName;
-    }
-
-    public void Enter(Entity agent)
-    {
-        if (!agent.TryGetComponent<NPCMotorComponent>(out _motor))
+        if (!agent.TryGetComponent(out _motor))
         {
             Fail("Agent lacks NPCMotorComponent");
             return;
@@ -101,7 +94,7 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
 
     private void OnArrived() => _arrived = true;
 
-    public ActionStatus Update(Entity agent, float dt)
+    public override ActionStatus Update(Entity agent, float dt)
     {
         if (_failed || _targetEntity == null)
             return ActionStatus.Failed;
@@ -120,7 +113,7 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
         return ActionStatus.Running;
     }
 
-    public void Exit(Entity agent, ActionExitReason reason)
+    public override void Exit(Entity agent, ActionExitReason reason)
     {
         if (_motor != null)
         {
@@ -138,18 +131,46 @@ public sealed class MoveToEntityAction : IAction, IRuntimeGuard
         }
     }
 
-    public bool StillValid(Entity agent)
+    public override bool StillValid(Entity agent)
     {
         if (_failed) return false;
 
-        // Check if target still exists and is active (O(1) instead of O(n) linear search)
-        if (_targetEntity == null || !_targetEntity.IsActive)
-            return false;
+        return EvaluateGuardPeriodically(agent, () =>
+        {
+            if (_targetEntity == null || !_targetEntity.IsActive)
+                return false;
 
-        return true;
+            bool valid = true;
+
+            if (_finderConfig.Filter != null)
+            {
+                try
+                {
+                    valid = _finderConfig.Filter(_targetEntity);
+                }
+                catch
+                {
+                    valid = false;
+                }
+            }
+
+            if (valid)
+            {
+                if (_finderConfig.RequireUnreserved)
+                {
+                    valid = ResourceReservationManager.Instance.IsAvailableFor(_targetEntity, agent);
+                }
+                else if (_finderConfig.RequireReservation)
+                {
+                    valid = ResourceReservationManager.Instance.IsReservedBy(_targetEntity, agent);
+                }
+            }
+
+            return valid;
+        });
     }
 
-    public void Fail(string reason)
+    public override void Fail(string reason)
     {
         GD.PushError($"{_actionName} fail: {reason}");
         _failed = true;

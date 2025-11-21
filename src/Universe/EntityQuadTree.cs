@@ -1,30 +1,77 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using Game.Data;
 using Godot;
 
 namespace Game.Universe;
 
 /// <summary>
-/// Standalone loose quadtree optimized for point-like entities with unknown world bounds.
-/// Handles inserts, removals, updates, and spatial queries. No dependency on EntityManager.
+/// High-performance Data-Oriented QuadTree.
+/// Uses flat arrays and integer indexing to maximize cache locality and minimize GC pressure.
+/// Entities store their own 'SpatialHandle' (index) for O(1) updates/removals.
 /// </summary>
 public sealed class EntityQuadTree
 {
+    private struct NodeData
+    {
+        // Hot Data (Accessed in Query/IntersectsCircle)
+        // Reordered to fit in first 32-40 bytes for cache locality
+        public float CenterX;
+        public float CenterY;
+        public float LooseHalfSize;
+        public float LooseRadius;
+        
+        public int FirstChildIndex; // Index of first child (4 sequential nodes), or -1 if leaf
+        public int FirstElementIndex; // Index of first element in linked list, or -1
+
+        public float HalfSize; // Used in Expand/Subdivide (less hot in queries)
+
+        // Metadata
+        public int Count;
+        public int Depth;
+        public int ParentIndex;
+
+        // Cold Data (Large structs, rarely used in hot loops)
+        public Rect2 Bounds;
+        public Rect2 LooseBounds;
+    }
+
+    private struct ElementData
+    {
+        public Entity Entity;
+        public Vector2 Position;
+        public int NextElementIndex; // Next element in the same node
+        public int PrevElementIndex; // Previous element (doubly linked for O(1) removal)
+        public int NodeIndex; // The node this element belongs to
+    }
+
     private readonly float _minNodeSize;
     private readonly int _maxItemsPerNode;
     private readonly float _looseFactor;
     private readonly int _maxDepth;
-    private readonly float _initialHalfExtent;
-    private readonly Vector2 _initialCenter;
+    private const float SQRT2 = 1.41421356237f;
+    
+    // Storage
+    private NodeData[] _nodes;
+    private int _nodeCount;
+    
+    private ElementData[] _elements;
+    private int _elementCount;
+    private int _elementCapacity;
+    private int _firstFreeElement = -1;
 
-    private Node _root;
-    private readonly Dictionary<Guid, Item> _items = new();
+    private int _rootIndex = -1;
+    
+    // Reusable query buffers
+    private readonly int[] _nodeStack; // Reusable stack for queries
+    private readonly List<Entity> _reusableResults = new(256);
+    private readonly List<int> _rebuildHandles = new(256);
 
-    // CRITICAL OPTIMIZATION: Reusable query buffers to eliminate allocation churn
-    // These are safe because queries are not re-entrant (one query completes before next starts)
-    private readonly Stack<Node> _reusableStack = new(32); // Pre-sized for typical tree depth
-    private readonly List<Entity> _reusableResults = new(64); // Pre-sized for typical query results
+    public int TrackedEntityCount => _activeItemCount;
+
+    // Simple helper to count real items if needed, though usually we just track inserted count
+    private int _activeItemCount = 0; 
 
     public EntityQuadTree(
         float initialExtent = 32768f,
@@ -34,836 +81,697 @@ public sealed class EntityQuadTree
         int maxDepth = 12,
         Vector2? initialCenter = null)
     {
-        if (initialExtent <= 0f) throw new ArgumentOutOfRangeException(nameof(initialExtent));
-        if (minNodeSize <= 0f) throw new ArgumentOutOfRangeException(nameof(minNodeSize));
-        if (maxItemsPerNode < 1) throw new ArgumentOutOfRangeException(nameof(maxItemsPerNode));
-        if (looseFactor < 1f) throw new ArgumentOutOfRangeException(nameof(looseFactor));
-        if (maxDepth < 1) throw new ArgumentOutOfRangeException(nameof(maxDepth));
-
         _minNodeSize = minNodeSize;
         _maxItemsPerNode = maxItemsPerNode;
         _looseFactor = looseFactor;
         _maxDepth = maxDepth;
-        _initialHalfExtent = Mathf.Max(initialExtent * 0.5f, minNodeSize);
-        _initialCenter = initialCenter ?? Vector2.Zero;
+
+        // Initialize arrays with reasonable defaults to avoid immediate resizing
+        _nodes = new NodeData[1024];
+        _elements = new ElementData[2048];
+        _elementCapacity = 2048;
+        _nodeStack = new int[maxDepth * 4 + 32];
+
+        Reset(initialCenter ?? Vector2.Zero, Mathf.Max(initialExtent * 0.5f, minNodeSize));
     }
 
-    public int TrackedEntityCount => _items.Count;
+    private void Reset(Vector2 center, float halfSize)
+    {
+        _nodeCount = 0;
+        _elementCount = 0;
+        _activeItemCount = 0;
+        _firstFreeElement = -1;
+        
+        // Create root
+        _rootIndex = AllocateNode();
+        InitializeNode(_rootIndex, center, halfSize, 0, -1);
+    }
 
     public void Clear()
     {
-        _items.Clear();
-        _root = null;
-    }
-
-    public bool Remove(Entity entity)
-    {
-        if (entity == null) return false;
-        if (!_items.Remove(entity.Id, out var item))
+        // Just reset counters, no array clearing needed (O(1) clear)
+        // We preserve the root dimensions though
+        if (_rootIndex != -1)
         {
-            return false;
+            var center = new Vector2(_nodes[_rootIndex].CenterX, _nodes[_rootIndex].CenterY);
+            var halfSize = _nodes[_rootIndex].HalfSize;
+            Reset(center, halfSize);
         }
-
-        item.Node?.Remove(item);
-        item.Node = null;
-        return true;
     }
 
     public void InsertOrUpdate(Entity entity, Vector2 position)
     {
         if (entity == null) return;
 
-        if (_items.TryGetValue(entity.Id, out var existing))
+        // CASE 1: Entity is already tracked
+        if (entity.SpatialHandle != -1)
         {
-            if (existing.Node == null)
+            ref var el = ref _elements[entity.SpatialHandle];
+            
+            // If position hasn't changed enough to matter (still in same node loose bounds), update and return
+            // Check if new position is within the *current node's loose bounds*
+            if (el.NodeIndex != -1)
             {
-                existing.Position = position;
-                EnsureRootFor(position);
-                _root.Insert(existing);
-                return;
+                 ref var currentNode = ref _nodes[el.NodeIndex];
+                 if (currentNode.LooseBounds.HasPoint(position))
+                 {
+                     el.Position = position; // Just update position
+                     return; // FAST PATH EXIT
+                 }
+                 
+                 // Moved outside node: Remove from current node, then fall through to re-insert
+                 RemoveFromNode(entity.SpatialHandle, el.NodeIndex);
             }
-
-            existing.Position = position;
-            if (!existing.Node.LooseContains(position))
-            {
-                existing.Node.Remove(existing);
-                EnsureRootFor(position);
-                _root.Insert(existing);
-            }
-            return;
+        }
+        else
+        {
+            // New entity allocation
+            entity.SpatialHandle = AllocateElement();
+            ref var newEl = ref _elements[entity.SpatialHandle];
+            newEl.Entity = entity;
         }
 
-        var item = new Item(entity, position);
-        _items.Add(entity.Id, item);
+        // Set new position
+        ref var element = ref _elements[entity.SpatialHandle];
+        element.Position = position;
+
+        // Ensure root covers this point
         EnsureRootFor(position);
-        _root.Insert(item);
+
+        // Insert into tree
+        InsertElementRecursive(_rootIndex, entity.SpatialHandle);
     }
 
-    /// <summary>
-    /// PERFORMANCE WARNING: Returns a REUSABLE list that is cleared on the next query.
-    /// Callers MUST consume results immediately before calling another query method.
-    /// Do NOT store the returned list or iterate it after subsequent queries.
-    /// </summary>
+    public bool Remove(Entity entity)
+    {
+        if (entity == null || entity.SpatialHandle == -1) return false;
+
+        int handle = entity.SpatialHandle;
+        ref var el = ref _elements[handle];
+        
+        if (el.NodeIndex != -1)
+        {
+            RemoveFromNode(handle, el.NodeIndex);
+        }
+
+        FreeElement(handle);
+        entity.SpatialHandle = -1;
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void InsertElementRecursive(int nodeIndex, int elementHandle)
+    {
+        // 1. If node has children, try to push down
+        ref var node = ref _nodes[nodeIndex];
+        
+        if (node.FirstChildIndex != -1)
+        {
+            int quadrant = GetQuadrant(new Vector2(node.CenterX, node.CenterY), _elements[elementHandle].Position);
+            int childIndex = node.FirstChildIndex + quadrant;
+            
+            // If child fully contains point (in loose bounds), go down
+            ref var child = ref _nodes[childIndex];
+            if (child.LooseBounds.HasPoint(_elements[elementHandle].Position))
+            {
+                InsertElementRecursive(childIndex, elementHandle);
+                return;
+            }
+        }
+
+        // 2. Must insert here (Leaf or doesn't fit in children)
+        // Add to linked list
+        int oldHead = node.FirstElementIndex;
+        node.FirstElementIndex = elementHandle;
+        
+        ref var el = ref _elements[elementHandle];
+        el.NodeIndex = nodeIndex;
+        el.NextElementIndex = oldHead;
+        el.PrevElementIndex = -1;
+        
+        if (oldHead != -1)
+        {
+            _elements[oldHead].PrevElementIndex = elementHandle;
+        }
+
+        node.Count++;
+
+        // 3. Check subdivision
+        if (node.FirstChildIndex == -1 && node.Count > _maxItemsPerNode && node.Depth < _maxDepth)
+        {
+            Subdivide(nodeIndex);
+        }
+    }
+
+    private void Subdivide(int nodeIndex)
+    {
+        ref var node = ref _nodes[nodeIndex];
+        
+        // Allocate 4 children
+        int firstChild = AllocateNode(); 
+        AllocateNode(); AllocateNode(); AllocateNode(); // Reserve 3 more sequential
+
+        // Re-fetch ref as array might have resized
+        ref var nodeRef = ref _nodes[nodeIndex]; 
+        nodeRef.FirstChildIndex = firstChild;
+
+        float childHalf = nodeRef.HalfSize * 0.5f;
+        int nextDepth = nodeRef.Depth + 1;
+
+        // Init children
+        for (int i = 0; i < 4; i++)
+        {
+            float childCenterX = nodeRef.CenterX + (((i & 1) == 0) ? -childHalf : childHalf);
+            float childCenterY = nodeRef.CenterY + (((i & 2) == 0) ? -childHalf : childHalf);
+            InitializeNode(firstChild + i, new Vector2(childCenterX, childCenterY), childHalf, nextDepth, nodeIndex);
+        }
+
+        // Distribute items
+        int currentElIndex = nodeRef.FirstElementIndex;
+        nodeRef.FirstElementIndex = -1;
+        nodeRef.Count = 0;
+
+        while (currentElIndex != -1)
+        {
+            int next = _elements[currentElIndex].NextElementIndex;
+            // Re-insert (will go to children now)
+            InsertElementRecursive(nodeIndex, currentElIndex);
+            currentElIndex = next;
+        }
+    }
+
+    private void RemoveFromNode(int elementHandle, int nodeIndex)
+    {
+        ref var node = ref _nodes[nodeIndex];
+        ref var el = ref _elements[elementHandle];
+
+        if (el.PrevElementIndex != -1)
+        {
+            _elements[el.PrevElementIndex].NextElementIndex = el.NextElementIndex;
+        }
+        else
+        {
+            // Was head
+            node.FirstElementIndex = el.NextElementIndex;
+        }
+
+        if (el.NextElementIndex != -1)
+        {
+            _elements[el.NextElementIndex].PrevElementIndex = el.PrevElementIndex;
+        }
+
+        el.NodeIndex = -1;
+        el.NextElementIndex = -1;
+        el.PrevElementIndex = -1;
+        node.Count--;
+    }
+
+    // ---------------- QUERIES ----------------
+
     public List<Entity> QueryCircle(Vector2 center, float radius, Func<Entity, bool> predicate = null, int maxResults = int.MaxValue)
     {
-        // CRITICAL: Reuse buffers to eliminate List/Stack allocations
         _reusableResults.Clear();
-        _reusableStack.Clear();
+        if (_rootIndex == -1) return _reusableResults;
 
-        if (_root == null || radius < 0f || maxResults <= 0)
+        float rSq = radius * radius;
+        bool checkRadius = !float.IsPositiveInfinity(radius);
+        
+        // Root check: if root doesn't intersect, return empty
+        if (checkRadius && !IntersectsCircle(ref _nodes[_rootIndex], center, radius, rSq))
         {
             return _reusableResults;
         }
+        
+        int stackPtr = 0;
+        _nodeStack[stackPtr++] = _rootIndex;
 
-        var searchRadius = radius <= 0f || float.IsInfinity(radius) ? float.PositiveInfinity : radius;
-        var radiusSquared = float.IsPositiveInfinity(searchRadius) ? float.PositiveInfinity : searchRadius * searchRadius;
+        while (stackPtr > 0 && _reusableResults.Count < maxResults)
+        {
+            int nodeIdx = _nodeStack[--stackPtr];
+            ref var node = ref _nodes[nodeIdx];
 
-        SpanQuery(center, radiusSquared, predicate, maxResults, _reusableResults, _reusableStack, QueryShape.Circle);
+            // Redundant check removed: we now check children before pushing them.
+            // Root was checked before loop.
+            
+            // 2. Iterate Elements
+            int elIdx = node.FirstElementIndex;
+            if (checkRadius)
+            {
+                while (elIdx != -1)
+                {
+                    ref var el = ref _elements[elIdx];
+                    
+                    // Check distance using cached position
+                    float dx = el.Position.X - center.X;
+                    float dy = el.Position.Y - center.Y;
+                    
+                    if (dx*dx + dy*dy <= rSq)
+                    {
+                        if (predicate == null || predicate(el.Entity))
+                        {
+                            _reusableResults.Add(el.Entity);
+                            if (_reusableResults.Count >= maxResults) return _reusableResults;
+                        }
+                    }
+                    elIdx = el.NextElementIndex;
+                }
+            }
+            else
+            {
+                while (elIdx != -1)
+                {
+                    ref var el = ref _elements[elIdx];
+                    if (predicate == null || predicate(el.Entity))
+                    {
+                        _reusableResults.Add(el.Entity);
+                        if (_reusableResults.Count >= maxResults) return _reusableResults;
+                    }
+                    elIdx = el.NextElementIndex;
+                }
+            }
+
+            // 3. Push Children
+            if (node.FirstChildIndex != -1)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    int childIdx = node.FirstChildIndex + i;
+                    ref var child = ref _nodes[childIdx];
+                    
+                    // Only push intersecting children
+                    if (!checkRadius || IntersectsCircle(ref child, center, radius, rSq))
+                    {
+                         _nodeStack[stackPtr++] = childIdx;
+                    }
+                }
+            }
+        }
+
         return _reusableResults;
     }
 
-    /// <summary>
-    /// PERFORMANCE WARNING: Returns a REUSABLE list that is cleared on the next query.
-    /// Callers MUST consume results immediately before calling another query method.
-    /// Do NOT store the returned list or iterate it after subsequent queries.
-    /// </summary>
     public List<Entity> QueryCircleWithCounts(Vector2 center, float radius, Func<Entity, bool> predicate, int maxResults, out int testedCount)
     {
         testedCount = 0;
-
-        // CRITICAL: Reuse buffers to eliminate List/Stack allocations
         _reusableResults.Clear();
-        _reusableStack.Clear();
+        if (_rootIndex == -1) return _reusableResults;
 
-        if (_root == null || radius < 0f || maxResults <= 0)
+        float rSq = radius * radius;
+        bool checkRadius = !float.IsPositiveInfinity(radius);
+        
+        if (checkRadius && !IntersectsCircle(ref _nodes[_rootIndex], center, radius, rSq))
         {
             return _reusableResults;
         }
+        
+        int stackPtr = 0;
+        _nodeStack[stackPtr++] = _rootIndex;
 
-        var searchRadius = radius <= 0f || float.IsInfinity(radius) ? float.PositiveInfinity : radius;
-        var radiusSquared = float.IsPositiveInfinity(searchRadius) ? float.PositiveInfinity : searchRadius * searchRadius;
-
-        _reusableStack.Push(_root);
-
-        // OPTIMIZATION: Hoist invariant checks out of hot loop
-        bool hasRadius = !float.IsPositiveInfinity(radiusSquared);
-        bool hasPredicate = predicate != null;
-
-        while (_reusableStack.Count > 0 && _reusableResults.Count < maxResults)
+        while (stackPtr > 0 && _reusableResults.Count < maxResults)
         {
-            var node = _reusableStack.Pop();
-            if (!node.IntersectsCircle(center, radiusSquared))
-                continue;
+            int nodeIdx = _nodeStack[--stackPtr];
+            ref var node = ref _nodes[nodeIdx];
 
-            // CRITICAL OPTIMIZATION: Access node.Items once to help JIT optimize bounds checks
-            var items = node.Items;
-            int itemCount = items.Count;
-
-            for (int i = 0; i < itemCount; i++)
+            // Iterate Elements
+            int elIdx = node.FirstElementIndex;
+            if (checkRadius)
             {
-                if (_reusableResults.Count >= maxResults)
-                    return _reusableResults;
-
-                var item = items[i];
-                var entity = item.Entity;
-                if (entity == null)
-                    continue;
-
-                testedCount++;
-
-                // CRITICAL FIX: Use item.Position instead of entity.Transform.Position
-                // Item already caches position - avoids expensive Transform component lookup!
-                if (hasRadius)
+                while (elIdx != -1)
                 {
-                    var dx = item.Position.X - center.X;
-                    var dy = item.Position.Y - center.Y;
-                    var distSq = dx * dx + dy * dy;
-                    if (distSq > radiusSquared)
-                        continue;
+                    ref var el = ref _elements[elIdx];
+                    testedCount++;
+
+                    float dx = el.Position.X - center.X;
+                    float dy = el.Position.Y - center.Y;
+                    
+                    if (dx*dx + dy*dy <= rSq)
+                    {
+                        if (predicate == null || predicate(el.Entity))
+                        {
+                            _reusableResults.Add(el.Entity);
+                            if (_reusableResults.Count >= maxResults) return _reusableResults;
+                        }
+                    }
+                    elIdx = el.NextElementIndex;
                 }
-
-                // Apply predicate filter after spatial filter
-                if (hasPredicate && !predicate(entity))
-                    continue;
-
-                _reusableResults.Add(entity);
+            }
+            else
+            {
+                while (elIdx != -1)
+                {
+                    ref var el = ref _elements[elIdx];
+                    testedCount++;
+                    if (predicate == null || predicate(el.Entity))
+                    {
+                        _reusableResults.Add(el.Entity);
+                        if (_reusableResults.Count >= maxResults) return _reusableResults;
+                    }
+                    elIdx = el.NextElementIndex;
+                }
             }
 
-            if (node.Children == null)
-                continue;
-
-            // OPTIMIZATION: Process children array directly
-            var children = node.Children;
-            for (int i = 0; i < children.Length; i++)
+            // Push Children
+            if (node.FirstChildIndex != -1)
             {
-                var child = children[i];
-                if (child == null)
-                    continue;
-                if (!child.IntersectsCircle(center, radiusSquared))
-                    continue;
-                _reusableStack.Push(child);
+                for (int i = 0; i < 4; i++)
+                {
+                    int childIdx = node.FirstChildIndex + i;
+                    ref var child = ref _nodes[childIdx];
+                    if (!checkRadius || IntersectsCircle(ref child, center, radius, rSq))
+                    {
+                         _nodeStack[stackPtr++] = childIdx;
+                    }
+                }
             }
         }
 
         return _reusableResults;
     }
 
-    /// <summary>
-    /// PERFORMANCE WARNING: Returns a REUSABLE list that is cleared on the next query.
-    /// Callers MUST consume results immediately before calling another query method.
-    /// Do NOT store the returned list or iterate it after subsequent queries.
-    /// </summary>
     public List<Entity> QueryRectangle(Rect2 area, Func<Entity, bool> predicate = null, int maxResults = int.MaxValue)
     {
-        // CRITICAL: Reuse buffers to eliminate List/Stack allocations
         _reusableResults.Clear();
-        _reusableStack.Clear();
+        if (_rootIndex == -1) return _reusableResults;
 
-        if (_root == null || maxResults <= 0)
+        int stackPtr = 0;
+        _nodeStack[stackPtr++] = _rootIndex;
+
+        while (stackPtr > 0 && _reusableResults.Count < maxResults)
         {
-            return _reusableResults;
+            int nodeIdx = _nodeStack[--stackPtr];
+            ref var node = ref _nodes[nodeIdx];
+
+            // Rectangle query still does check-on-pop because we use Intersects(Rect2) which is fast.
+            // But we could optimize it similarly.
+            if (!node.LooseBounds.Intersects(area)) continue;
+
+            int elIdx = node.FirstElementIndex;
+            while (elIdx != -1)
+            {
+                ref var el = ref _elements[elIdx];
+                
+                if (area.HasPoint(el.Position) && (predicate == null || predicate(el.Entity)))
+                {
+                    _reusableResults.Add(el.Entity);
+                    if (_reusableResults.Count >= maxResults) return _reusableResults;
+                }
+                elIdx = el.NextElementIndex;
+            }
+
+            if (node.FirstChildIndex != -1)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    int childIdx = node.FirstChildIndex + i;
+                    // Optimization: Check before push
+                    if (_nodes[childIdx].LooseBounds.Intersects(area))
+                    {
+                        _nodeStack[stackPtr++] = childIdx;
+                    }
+                }
+            }
         }
 
-        SpanQuery(area, predicate, maxResults, _reusableResults, _reusableStack);
         return _reusableResults;
     }
 
     public Entity FindNearest(Vector2 center, float maxRadius, Func<Entity, bool> predicate = null)
     {
-        if (_root == null) return null;
-
-        var radius = maxRadius <= 0f || float.IsInfinity(maxRadius)
-            ? float.PositiveInfinity
-            : maxRadius;
-        var radiusSquared = float.IsPositiveInfinity(radius) ? float.PositiveInfinity : radius * radius;
-
-        Entity closest = null;
-        var bestDistSq = radiusSquared;
-
-        // CRITICAL: Reuse stack to eliminate allocation
-        _reusableStack.Clear();
-        _reusableStack.Push(_root);
-
-        // OPTIMIZATION: Hoist invariant check out of hot loop
-        bool hasPredicate = predicate != null;
-
-        while (_reusableStack.Count > 0)
-        {
-            var node = _reusableStack.Pop();
-            if (!node.IntersectsCircle(center, bestDistSq))
-                continue;
-
-            // CRITICAL OPTIMIZATION: Access node.Items once to help JIT optimize bounds checks
-            var items = node.Items;
-            int itemCount = items.Count;
-
-            for (int i = 0; i < itemCount; i++)
-            {
-                var item = items[i];
-                var candidate = item.Entity;
-                if (candidate == null)
-                    continue;
-
-                // Apply predicate filter first (cheaper than distance calculation)
-                if (hasPredicate && !predicate(candidate))
-                    continue;
-
-                // CRITICAL FIX: Use item.Position instead of candidate.Transform.Position
-                // Item already caches position - avoids expensive Transform component lookup!
-                var dx = item.Position.X - center.X;
-                var dy = item.Position.Y - center.Y;
-                var distSq = dx * dx + dy * dy;
-
-                if (distSq >= bestDistSq)
-                    continue;
-
-                closest = candidate;
-                bestDistSq = distSq;
-            }
-
-            if (node.Children != null)
-            {
-                // OPTIMIZATION: Process children array directly
-                var children = node.Children;
-                for (int i = 0; i < children.Length; i++)
-                {
-                    var child = children[i];
-                    if (child == null)
-                        continue;
-                    if (!child.IntersectsCircle(center, bestDistSq))
-                        continue;
-                    _reusableStack.Push(child);
-                }
-            }
-        }
-
-        // Final radius check only if needed
-        if (!float.IsPositiveInfinity(radius) && closest != null && bestDistSq > radiusSquared)
-        {
-            return null;
-        }
-
-        return closest;
+        return FindNearestWithCounts(center, maxRadius, predicate, out _);
     }
 
     public Entity FindNearestWithCounts(Vector2 center, float maxRadius, Func<Entity, bool> predicate, out int testedCount)
     {
         testedCount = 0;
-        if (_root == null) return null;
+        if (_rootIndex == -1) return null;
 
-        var radius = maxRadius <= 0f || float.IsInfinity(maxRadius)
-            ? float.PositiveInfinity
-            : maxRadius;
-        var radiusSquared = float.IsPositiveInfinity(radius) ? float.PositiveInfinity : radius * radius;
+        float bestDistSq = float.IsPositiveInfinity(maxRadius) ? float.PositiveInfinity : maxRadius * maxRadius;
+        Entity bestEntity = null;
 
-        Entity closest = null;
-        var bestDistSq = radiusSquared;
+        int stackPtr = 0;
+        _nodeStack[stackPtr++] = _rootIndex;
 
-        // CRITICAL: Reuse stack to eliminate allocation
-        _reusableStack.Clear();
-        _reusableStack.Push(_root);
-
-        // OPTIMIZATION: Hoist invariant check out of hot loop
-        bool hasPredicate = predicate != null;
-
-        while (_reusableStack.Count > 0)
+        while (stackPtr > 0)
         {
-            var node = _reusableStack.Pop();
-            if (!node.IntersectsCircle(center, bestDistSq))
-                continue;
+            int nodeIdx = _nodeStack[--stackPtr];
+            ref var node = ref _nodes[nodeIdx];
 
-            // CRITICAL OPTIMIZATION: Access node.Items once to help JIT optimize bounds checks
-            var items = node.Items;
-            int itemCount = items.Count;
+            // Pruning: If node is further than current best distance, skip
+            // We check this on pop because bestDistSq SHRINKS during traversal.
+            // A node pushed earlier might now be invalid.
+            float bestDist = float.IsPositiveInfinity(bestDistSq) ? float.PositiveInfinity : MathF.Sqrt(bestDistSq);
+            if (!IntersectsCircle(ref node, center, bestDist, bestDistSq)) continue;
 
-            for (int i = 0; i < itemCount; i++)
+            // Check Items
+            int elIdx = node.FirstElementIndex;
+            while (elIdx != -1)
             {
-                var item = items[i];
-                var candidate = item.Entity;
-                if (candidate == null)
-                    continue;
-
+                ref var el = ref _elements[elIdx];
                 testedCount++;
+                
+                // Distance check first (using cached position)
+                float dx = el.Position.X - center.X;
+                float dy = el.Position.Y - center.Y;
+                float dSq = dx*dx + dy*dy;
 
-                // Apply predicate filter first (cheaper than distance calculation)
-                if (hasPredicate && !predicate(candidate))
-                    continue;
-
-                // CRITICAL FIX: Use item.Position instead of candidate.Transform.Position
-                // Item already caches position - avoids expensive Transform component lookup!
-                var dx = item.Position.X - center.X;
-                var dy = item.Position.Y - center.Y;
-                var distSq = dx * dx + dy * dy;
-
-                if (distSq >= bestDistSq)
-                    continue;
-
-                closest = candidate;
-                bestDistSq = distSq;
+                if (dSq < bestDistSq)
+                {
+                    if (predicate == null || predicate(el.Entity))
+                    {
+                        bestDistSq = dSq;
+                        bestEntity = el.Entity;
+                    }
+                }
+                elIdx = el.NextElementIndex;
             }
 
-            if (node.Children != null)
+            // Push children
+            if (node.FirstChildIndex != -1)
             {
-                // OPTIMIZATION: Process children array directly
-                var children = node.Children;
-                for (int i = 0; i < children.Length; i++)
+                bestDist = float.IsPositiveInfinity(bestDistSq) ? float.PositiveInfinity : MathF.Sqrt(bestDistSq);
+                for (int i = 0; i < 4; i++)
                 {
-                    var child = children[i];
-                    if (child == null)
-                        continue;
-                    if (!child.IntersectsCircle(center, bestDistSq))
-                        continue;
-                    _reusableStack.Push(child);
+                    int childIdx = node.FirstChildIndex + i;
+                    if (IntersectsCircle(ref _nodes[childIdx], center, bestDist, bestDistSq))
+                    {
+                        _nodeStack[stackPtr++] = childIdx;
+                    }
                 }
             }
         }
 
-        // Final radius check only if needed
-        if (!float.IsPositiveInfinity(radius) && closest != null && bestDistSq > radiusSquared)
+        return bestEntity;
+    }
+    
+    // ---------------- UTILS ----------------
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IntersectsCircle(ref NodeData node, Vector2 center, float radius, float radiusSq)
+    {
+        if (float.IsPositiveInfinity(radiusSq)) return true;
+
+        // Fast bounding-sphere rejection using cached LooseRadius
+        float ndx = center.X - node.CenterX;
+        float ndy = center.Y - node.CenterY;
+        float centerDistSq = ndx * ndx + ndy * ndy;
+        float maxReach = radius + node.LooseRadius;
+        if (centerDistSq > maxReach * maxReach)
         {
-            return null;
+            return false;
         }
 
-        return closest;
+        // Precise circle vs loose AABB
+        float minX = node.CenterX - node.LooseHalfSize;
+        float maxX = node.CenterX + node.LooseHalfSize;
+        float minY = node.CenterY - node.LooseHalfSize;
+        float maxY = node.CenterY + node.LooseHalfSize;
+
+        float closestX = center.X < minX ? minX : (center.X > maxX ? maxX : center.X);
+        float closestY = center.Y < minY ? minY : (center.Y > maxY ? maxY : center.Y);
+
+        float dx = center.X - closestX;
+        float dy = center.Y - closestY;
+        return (dx * dx + dy * dy) <= radiusSq;
     }
 
+    private int GetQuadrant(Vector2 nodeCenter, Vector2 point)
+    {
+        int q = 0;
+        if (point.X >= nodeCenter.X) q |= 1;
+        if (point.Y >= nodeCenter.Y) q |= 2;
+        return q;
+    }
+
+    private void EnsureRootFor(Vector2 point)
+    {
+        if (_rootIndex == -1)
+        {
+            Reset(point, _minNodeSize * 8f);
+            return;
+        }
+
+        var center = new Vector2(_nodes[_rootIndex].CenterX, _nodes[_rootIndex].CenterY);
+        float half = _nodes[_rootIndex].HalfSize;
+
+        while (!ContainsPoint(center, half, point))
+        {
+            half *= 2f;
+        }
+
+        if (half > _nodes[_rootIndex].HalfSize) // Did it grow?
+        {
+            RebuildTree(center, half);
+        }
+    }
+
+    private void RebuildTree(Vector2 center, float halfSize)
+    {
+        _rebuildHandles.Clear();
+        for (int i = 0; i < _elementCount; i++)
+        {
+            if (_elements[i].Entity == null) continue;
+            ref var el = ref _elements[i];
+            el.NodeIndex = -1;
+            el.NextElementIndex = -1;
+            el.PrevElementIndex = -1;
+            _rebuildHandles.Add(i);
+        }
+
+        _nodeCount = 0;
+        _rootIndex = AllocateNode();
+        InitializeNode(_rootIndex, center, halfSize, 0, -1);
+
+        for (int i = 0; i < _rebuildHandles.Count; i++)
+        {
+            InsertElementRecursive(_rootIndex, _rebuildHandles[i]);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void InitializeNode(int index, Vector2 center, float halfSize, int depth, int parentIndex)
+    {
+        ref var node = ref _nodes[index];
+        var clampedHalf = Mathf.Max(halfSize, _minNodeSize);
+        node.CenterX = center.X;
+        node.CenterY = center.Y;
+        node.HalfSize = clampedHalf;
+        node.LooseHalfSize = clampedHalf * _looseFactor;
+        node.LooseRadius = node.LooseHalfSize * SQRT2;
+
+        Vector2 halfVec = new(clampedHalf, clampedHalf);
+        node.Bounds = new Rect2(center - halfVec, halfVec * 2f);
+
+        Vector2 looseHalfVec = new(node.LooseHalfSize, node.LooseHalfSize);
+        node.LooseBounds = new Rect2(new Vector2(node.CenterX, node.CenterY) - looseHalfVec, looseHalfVec * 2f);
+
+        node.Depth = depth;
+        node.ParentIndex = parentIndex;
+        node.FirstChildIndex = -1;
+        node.FirstElementIndex = -1;
+        node.Count = 0;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool ContainsPoint(Vector2 center, float half, Vector2 point)
+    {
+        return point.X >= center.X - half &&
+               point.X <= center.X + half &&
+               point.Y >= center.Y - half &&
+               point.Y <= center.Y + half;
+    }
+
+    // ---------------- MEMORY ----------------
+
+    private int AllocateNode()
+    {
+        if (_nodeCount >= _nodes.Length)
+        {
+            Array.Resize(ref _nodes, _nodes.Length * 2);
+        }
+        return _nodeCount++;
+    }
+
+    private int AllocateElement()
+    {
+        int index;
+        if (_firstFreeElement != -1)
+        {
+            index = _firstFreeElement;
+            _firstFreeElement = _elements[index].NextElementIndex; // Pop free list
+        }
+        else
+        {
+            if (_elementCount >= _elements.Length)
+            {
+                Array.Resize(ref _elements, _elements.Length * 2);
+                _elementCapacity = _elements.Length;
+            }
+            index = _elementCount++;
+        }
+        
+        _activeItemCount++;
+        // Reset data
+        _elements[index].NextElementIndex = -1;
+        _elements[index].PrevElementIndex = -1;
+        _elements[index].NodeIndex = -1;
+        return index;
+    }
+
+    private void FreeElement(int index)
+    {
+        _elements[index].Entity = null; // Clear ref to allow GC
+        _elements[index].NextElementIndex = _firstFreeElement;
+        _firstFreeElement = index;
+        _activeItemCount--;
+    }
+
+    private int CountFreeElements()
+    {
+        int c = 0;
+        int cur = _firstFreeElement;
+        while (cur != -1)
+        {
+            c++;
+            cur = _elements[cur].NextElementIndex;
+        }
+        return c;
+    }
+    
     public void ForEachNode(Action<Rect2, Rect2, int, int> visitor, bool includeEmpty = true)
     {
-        if (visitor == null || _root == null) return;
-
-        // CRITICAL: Reuse stack to eliminate allocation
-        _reusableStack.Clear();
-        _reusableStack.Push(_root);
-
-        while (_reusableStack.Count > 0)
-        {
-            var node = _reusableStack.Pop();
-            int count = node.Items.Count;
-            if (includeEmpty || count > 0)
-            {
-                visitor(node.Bounds, node.LooseBounds, node.Depth, count);
-            }
-            if (node.Children != null)
-            {
-                for (int i = 0; i < node.Children.Length; i++)
-                {
-                    var child = node.Children[i];
-                    if (child != null) _reusableStack.Push(child);
-                }
-            }
-        }
+         if (_rootIndex == -1) return;
+         
+         int stackPtr = 0;
+         _nodeStack[stackPtr++] = _rootIndex;
+         
+         while (stackPtr > 0)
+         {
+             int idx = _nodeStack[--stackPtr];
+             ref var node = ref _nodes[idx];
+             
+             if (includeEmpty || node.Count > 0)
+             {
+                 visitor(node.Bounds, node.LooseBounds, node.Depth, node.Count);
+             }
+             
+             if (node.FirstChildIndex != -1)
+             {
+                 for(int i=0; i<4; i++) _nodeStack[stackPtr++] = node.FirstChildIndex + i;
+             }
+         }
     }
 
     public void ForEachItem(Action<Vector2> visitor, int maxCount = int.MaxValue)
     {
-        if (visitor == null || _items.Count == 0) return;
         int visited = 0;
-        foreach (var kv in _items)
+        for (int i = 0; i < _elementCount; i++)
         {
-            visitor(kv.Value.Position);
-            visited++;
-            if (visited >= maxCount) break;
-        }
-    }
-
-    private void SpanQuery(Vector2 center, float radiusSquared, Func<Entity, bool> predicate, int maxResults, List<Entity> results, Stack<Node> stack, QueryShape shape)
-    {
-        // Stack is already cleared and ready to use
-        stack.Push(_root);
-
-        // OPTIMIZATION: Hoist invariant checks out of hot loop
-        bool hasRadius = !float.IsPositiveInfinity(radiusSquared);
-        bool hasPredicate = predicate != null;
-
-        while (stack.Count > 0 && results.Count < maxResults)
-        {
-            var node = stack.Pop();
-            if (shape == QueryShape.Circle && !node.IntersectsCircle(center, radiusSquared))
-                continue;
-
-            // CRITICAL OPTIMIZATION: Access node.Items.Count once to help JIT optimize bounds checks
-            var items = node.Items;
-            int itemCount = items.Count;
-
-            for (int i = 0; i < itemCount; i++)
-            {
-                if (results.Count >= maxResults)
-                    return;
-
-                var item = items[i];
-                var entity = item.Entity;
-                if (entity == null)
-                    continue;
-
-                // CRITICAL FIX: Use item.Position instead of entity.Transform.Position
-                // Item already caches position - avoids expensive Transform component lookup!
-                if (shape == QueryShape.Circle && hasRadius)
-                {
-                    var dx = item.Position.X - center.X;
-                    var dy = item.Position.Y - center.Y;
-                    var distSq = dx * dx + dy * dy;
-                    if (distSq > radiusSquared)
-                        continue;
-                }
-
-                // Apply predicate filter after spatial filter (predicate is usually more expensive)
-                if (hasPredicate && !predicate(entity))
-                    continue;
-
-                results.Add(entity);
-            }
-
-            if (node.Children == null)
-                continue;
-
-            // OPTIMIZATION: Process children array directly
-            var children = node.Children;
-            for (int i = 0; i < children.Length; i++)
-            {
-                var child = children[i];
-                if (child == null)
-                    continue;
-                if (shape == QueryShape.Circle && !child.IntersectsCircle(center, radiusSquared))
-                    continue;
-                stack.Push(child);
-            }
-        }
-    }
-
-    private void SpanQuery(Rect2 area, Func<Entity, bool> predicate, int maxResults, List<Entity> results, Stack<Node> stack)
-    {
-        // Stack is already cleared and ready to use
-        stack.Push(_root);
-
-        // OPTIMIZATION: Hoist invariant check out of hot loop
-        bool hasPredicate = predicate != null;
-
-        while (stack.Count > 0 && results.Count < maxResults)
-        {
-            var node = stack.Pop();
-            if (!node.IntersectsRect(area))
-                continue;
-
-            // CRITICAL OPTIMIZATION: Access node.Items once to help JIT optimize bounds checks
-            var items = node.Items;
-            int itemCount = items.Count;
-
-            for (int i = 0; i < itemCount; i++)
-            {
-                if (results.Count >= maxResults)
-                    return;
-
-                var item = items[i];
-                var entity = item.Entity;
-                if (entity == null)
-                    continue;
-
-                // CRITICAL FIX: Use item.Position instead of entity.Transform.Position
-                // Item already caches position - avoids expensive Transform component lookup!
-                if (!area.HasPoint(item.Position))
-                    continue;
-
-                // Apply predicate filter after spatial filter
-                if (hasPredicate && !predicate(entity))
-                    continue;
-
-                results.Add(entity);
-            }
-
-            if (node.Children == null)
-                continue;
-
-            // OPTIMIZATION: Process children array directly
-            var children = node.Children;
-            for (int i = 0; i < children.Length; i++)
-            {
-                var child = children[i];
-                if (child == null)
-                    continue;
-                if (!child.IntersectsRect(area))
-                    continue;
-                stack.Push(child);
-            }
-        }
-    }
-
-    private void EnsureRootFor(Vector2 position)
-    {
-        if (_root == null)
-        {
-            _root = new Node(_initialCenter, _initialHalfExtent, 0, null, this);
-        }
-
-        if (_root.Contains(position))
-        {
-            return;
-        }
-
-        ExpandRoot(position);
-    }
-
-    private void ExpandRoot(Vector2 requiredPoint)
-    {
-        if (_root == null)
-        {
-            _root = new Node(_initialCenter, _initialHalfExtent, 0, null, this);
-        }
-
-        var snapshot = new List<Item>(_items.Values);
-        var newHalf = _root.HalfSize;
-        while (!Node.ContainsPoint(_root.Center, newHalf, requiredPoint))
-        {
-            newHalf *= 2f;
-        }
-
-        _root = new Node(_root.Center, newHalf, 0, null, this);
-
-        for (int i = 0; i < snapshot.Count; i++)
-        {
-            var item = snapshot[i];
-            item.Node = null;
-        }
-
-        for (int i = 0; i < snapshot.Count; i++)
-        {
-            _root.Insert(snapshot[i]);
-        }
-    }
-
-    private enum QueryShape
-    {
-        Circle,
-    }
-
-    private sealed class Item
-    {
-        public readonly Entity Entity;
-        public Vector2 Position;
-        public Node Node;
-
-        public Item(Entity entity, Vector2 position)
-        {
-            Entity = entity;
-            Position = position;
-        }
-    }
-
-    private sealed class Node
-    {
-        private readonly EntityQuadTree _index;
-
-        public Vector2 Center { get; }
-        public float HalfSize { get; }
-        public int Depth { get; }
-        public Rect2 Bounds { get; }
-        public Rect2 LooseBounds { get; }
-        public Node Parent { get; }
-        public List<Item> Items { get; }
-        public Node[] Children { get; private set; }
-
-        public Node(Vector2 center, float halfSize, int depth, Node parent, EntityQuadTree index)
-        {
-            Center = center;
-            HalfSize = Mathf.Max(halfSize, index._minNodeSize);
-            Depth = depth;
-            Parent = parent;
-            _index = index;
-            Bounds = CreateBounds(Center, HalfSize);
-            LooseBounds = CreateBounds(Center, HalfSize * index._looseFactor);
-            Items = new List<Item>(index._maxItemsPerNode + 1);
-        }
-
-        public void Insert(Item item)
-        {
-            if (Children != null)
-            {
-                var quadrant = GetQuadrant(item.Position);
-                var child = Children[quadrant];
-                if (child == null && CanCreateChild())
-                {
-                    child = CreateChild(quadrant);
-                }
-
-                if (child != null && child.Contains(item.Position))
-                {
-                    child.Insert(item);
-                    return;
-                }
-            }
-
-            Items.Add(item);
-            item.Node = this;
-
-            if (ShouldSubdivide())
-            {
-                Subdivide();
-            }
-        }
-
-        public void Remove(Item item)
-        {
-            if (!Items.Remove(item))
-            {
-                return;
-            }
-            item.Node = null;
-            TryCollapseUpwards();
-        }
-
-        public bool Contains(Vector2 point) => Bounds.HasPoint(point);
-
-        public bool LooseContains(Vector2 point) => LooseBounds.HasPoint(point);
-
-        public bool IntersectsCircle(Vector2 center, float radiusSquared)
-        {
-            if (float.IsPositiveInfinity(radiusSquared))
-                return true;
-
-            // OPTIMIZATION: Cache bounds for reuse and avoid repeated property access
-            // This helps JIT optimize bounds checks and reduces virtual calls
-            var bounds = Bounds;
-            var left = bounds.Position.X;
-            var right = left + bounds.Size.X;
-            var top = bounds.Position.Y;
-            var bottom = top + bounds.Size.Y;
-
-            // OPTIMIZATION: Early out if circle center is completely inside bounds
-            // This avoids the closest-point calculation when the query circle fully contains the node
-            // Common case when radius is large or node is small
-            if (center.X >= left && center.X <= right && center.Y >= top && center.Y <= bottom)
-                return true;
-
-            var closestX = center.X < left ? left : center.X > right ? right : center.X;
-            var closestY = center.Y < top ? top : center.Y > bottom ? bottom : center.Y;
-            
-            var dx = center.X - closestX;
-            var dy = center.Y - closestY;
-            return dx * dx + dy * dy <= radiusSquared;
-        }
-
-        public bool IntersectsRect(Rect2 area)
-        {
-            return Bounds.Intersects(area);
-        }
-
-        private void TryCollapseUpwards()
-        {
-            var current = this;
-            while (current != null)
-            {
-                if (!current.TryCollapse())
-                {
-                    break;
-                }
-                current = current.Parent;
-            }
-        }
-
-        private bool TryCollapse()
-        {
-            if (Children == null)
-            {
-                if (Items.Count == 0 && Parent != null && Parent.Children != null)
-                {
-                    // Eagerly unlink empty leaf from parent to avoid retaining empty nodes
-                    var idx = Parent.GetQuadrant(Center);
-                    if (idx >= 0 && idx < Parent.Children.Length && ReferenceEquals(Parent.Children[idx], this))
-                    {
-                        Parent.Children[idx] = null;
-                    }
-                    return true;
-                }
-                return false;
-            }
-
-            var totalItems = Items.Count;
-            for (int i = 0; i < Children.Length; i++)
-            {
-                var child = Children[i];
-                if (child == null)
-                    continue;
-                if (child.Children != null)
-                {
-                    return false;
-                }
-                totalItems += child.Items.Count;
-                if (totalItems > _index._maxItemsPerNode)
-                {
-                    return false;
-                }
-            }
-
-            for (int i = 0; i < Children.Length; i++)
-            {
-                var child = Children[i];
-                if (child == null)
-                    continue;
-                for (int j = 0; j < child.Items.Count; j++)
-                {
-                    var item = child.Items[j];
-                    Items.Add(item);
-                    item.Node = this;
-                }
-                child.Items.Clear();
-                Children[i] = null;
-            }
-
-            Children = null;
-            return Parent != null;
-        }
-
-        private bool CanCreateChild()
-        {
-            if (Depth + 1 > _index._maxDepth)
-            {
-                return false;
-            }
-            return HalfSize * 0.5f >= _index._minNodeSize;
-        }
-
-        private bool ShouldSubdivide()
-        {
-            if (Children != null)
-            {
-                return false;
-            }
-            if (Items.Count <= _index._maxItemsPerNode)
-            {
-                return false;
-            }
-            return CanCreateChild();
-        }
-
-        private void Subdivide()
-        {
-            Children ??= new Node[4];
-            for (int i = Items.Count - 1; i >= 0; i--)
-            {
-                var item = Items[i];
-                var quadrant = GetQuadrant(item.Position);
-                var child = Children[quadrant];
-                if (child == null)
-                {
-                    child = CreateChild(quadrant);
-                }
-
-                if (child == null)
-                {
-                    continue;
-                }
-
-                if (child.Contains(item.Position))
-                {
-                    Items.RemoveAt(i);
-                    child.Insert(item);
-                }
-            }
-        }
-
-        private Node CreateChild(int quadrant)
-        {
-            if (!CanCreateChild())
-            {
-                return null;
-            }
-
-            var offset = HalfSize * 0.5f;
-            var childCenter = new Vector2(
-                Center.X + (((quadrant & 1) == 1) ? offset : -offset),
-                Center.Y + (((quadrant & 2) == 2) ? offset : -offset));
-
-            var child = new Node(childCenter, HalfSize * 0.5f, Depth + 1, this, _index);
-            Children ??= new Node[4];
-            Children[quadrant] = child;
-            return child;
-        }
-
-        private int GetQuadrant(Vector2 point)
-        {
-            var quadrant = 0;
-            if (point.X >= Center.X)
-            {
-                quadrant |= 1;
-            }
-            if (point.Y >= Center.Y)
-            {
-                quadrant |= 2;
-            }
-            return quadrant;
-        }
-
-        private static Rect2 CreateBounds(Vector2 center, float halfSize)
-        {
-            var size = new Vector2(halfSize * 2f, halfSize * 2f);
-            return new Rect2(center - size * 0.5f, size);
-        }
-
-        public static bool ContainsPoint(Vector2 center, float halfSize, Vector2 point)
-        {
-            var bounds = CreateBounds(center, halfSize);
-            return bounds.HasPoint(point);
+             if (_elements[i].Entity != null)
+             {
+                 visitor(_elements[i].Position);
+                 visited++;
+                 if (visited >= maxCount) break;
+             }
         }
     }
 }
-
-

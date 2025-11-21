@@ -12,14 +12,18 @@ namespace Game.Data.Components;
 public class FireVisualComponent(
     string flameTexturePath = "res://textures/Flame.png",
     float intensity = 1.0f,
-    bool startActive = true
+    bool startActive = true,
+    Vector2? scaleMultiplier = null,
+    Vector2? visualOffset = null
 ) : IActiveComponent
 {
     // Config
     public string FlameTexturePath { get; set; } = flameTexturePath;
     public float Intensity { get; set; } = intensity;
+    public Vector2 ScaleMultiplier { get; set; } = scaleMultiplier ?? Vector2.One;
     public bool IsActive { get; private set; } = startActive;
-    
+    public Vector2 VisualOffset { get; set; } = visualOffset ?? Vector2.Zero;
+
     // Cached component references
     private TransformComponent2D _transform2D;
     private VisualComponent _visual;
@@ -74,8 +78,9 @@ public class FireVisualComponent(
         {
             // Flicker scale between 0.9 and 1.1
             var flicker = 1.0f + 0.1f * Mathf.Sin(_time * 18.0f);
-            var scale = _transform2D.Scale * flicker * Intensity;
-            CustomEntityRenderEngineLocator.Renderer.UpdateSprite(_flameSpriteId, _transform2D.Position, _transform2D.Rotation, scale);
+            var scale = _transform2D.Scale * (flicker * Intensity) * ScaleMultiplier;
+            var position = _transform2D.Position + VisualOffset;
+            CustomEntityRenderEngineLocator.Renderer.UpdateSprite(_flameSpriteId, position, _transform2D.Rotation, scale);
 
             // Alpha pulse for warmth
             var alpha = 0.75f + 0.2f * Mathf.Sin(_time * 12.0f + 1.57f);
@@ -86,11 +91,13 @@ public class FireVisualComponent(
         {
             // Fallback: debug circle if no texture available
             var r = 8f + 2f * Mathf.Sin(_time * 15.0f);
+            var position = _transform2D.Position + VisualOffset;
+            // Use X scale for primary size
             CustomEntityRenderEngineLocator.Renderer.QueueDebugCircle(
-                _transform2D.Position, 
-                r * Intensity, 
-                new Color(1f, 0.4f, 0.1f, 0.85f * Intensity), 
-                2f, 
+                position,
+                r * Intensity * ScaleMultiplier.X,
+                new Color(1f, 0.4f, 0.1f, 0.85f * Intensity),
+                2f,
                 24
             );
         }
@@ -137,11 +144,12 @@ public class FireVisualComponent(
 
         if (_flameTexture != null)
         {
+            var position = _transform2D.Position + VisualOffset;
             _flameSpriteId = CustomEntityRenderEngineLocator.Renderer.AddSprite(
                 _flameTexture,
-                _transform2D.Position,
+                position,
                 _transform2D.Rotation,
-                _transform2D.Scale * Intensity,
+                _transform2D.Scale * Intensity * ScaleMultiplier,
                 FlameTint,
                 FlameZBias
             );

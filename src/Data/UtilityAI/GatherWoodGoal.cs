@@ -30,10 +30,9 @@ public class GatherWoodGoal : IUtilityGoal
     
     public State GetGoalState(Entity agent)
     {
-        return new State(new Dictionary<string, object> 
-        { 
-            { FactKeys.AgentCount(TargetType.Stick), TARGET_STICKS } 
-        });
+        var s = new State();
+        s.Set(FactKeys.AgentCount(TargetType.Stick), TARGET_STICKS);
+        return s;
     }
     
     public bool IsSatisfied(Entity agent)

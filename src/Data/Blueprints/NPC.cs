@@ -20,12 +20,16 @@ public static class NPC
             new NPCData()
         ],
         addMutators: [
-            EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = Random.NextItem([
-                "res://textures/Boy.png",
-                "res://textures/Female.png",
-                "res://textures/Girl.png",
-                "res://textures/Male.png"
-            ])),
+            EntityBlueprint.Mutate<NPCData>((npc) =>
+            {
+                npc.Gender = Random.NextEnum<NPCGender>();
+                npc.AgeGroup = Random.NextEnum<NPCAgeGroup>();
+            }),
+            EntityBlueprint.Mutate<VisualComponent>((c, entity) =>
+            {
+                var npcData = entity.GetComponent<NPCData>();
+                c.PendingSpritePath = DetermineSpritePath(npcData);
+            }),
             EntityBlueprint.Mutate<VisualComponent>((c) => c.VisualOriginOffset = new Vector2(0,-50f))
             // EntityBlueprint.Mutate<NPCMotorComponent>((c) => c.DebugDrawEnabled = true)
         ]
@@ -57,6 +61,21 @@ public static class NPC
             EntityBlueprint.Mutate<NPCData>((npc) => npc.Hunger = Random.NextFloat(0f, 80f))
         ]
     );
+    private static string DetermineSpritePath(NPCData npcData)
+    {
+        var ageGroup = npcData?.AgeGroup ?? NPCAgeGroup.Adult;
+        var gender = npcData?.Gender ?? NPCGender.Male;
+
+        return ageGroup switch
+        {
+            NPCAgeGroup.Child => gender == NPCGender.Male
+                ? "res://textures/Boy.png"
+                : "res://textures/Girl.png",
+            _ => gender == NPCGender.Male
+                ? "res://textures/Male.png"
+                : "res://textures/Female.png"
+        };
+    }
 }
 
 

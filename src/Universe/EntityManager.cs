@@ -257,6 +257,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 					_activeEntities.Add(concrete);
 				}
 				HookActiveTracking(concrete);
+				WorldEventBus.Instance.PublishEntitySpawned(concrete);
 			}
 			return true;
 		}
@@ -285,6 +286,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 				UnhookSpatialTracking(concrete);
 				UnhookActiveTracking(concrete);
 				_activeEntities.Remove(concrete);
+				WorldEventBus.Instance.PublishEntityDespawned(concrete);
 			}
 			return true;
 		}

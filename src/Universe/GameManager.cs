@@ -14,7 +14,7 @@ namespace Game.Universe;
 public partial class GameManager : SingletonNode<GameManager>
 {
 	[Export] public bool DebugMode = false;
-	[Export] public string StartingScenario = "Default";
+	[Export] public string StartingScenario = "StayWarmTest";
 	/// <summary>
 	/// Event that fires every physics tick. Subscribe to this to receive tick updates.
 	/// </summary>
@@ -123,6 +123,8 @@ public partial class GameManager : SingletonNode<GameManager>
 	public override void _Process(double delta)
 	{
 		base._Process(delta);
+
+		FrameTime.Advance((float)delta);
 
 		UpdateSmoothedFrameTime(delta);
 

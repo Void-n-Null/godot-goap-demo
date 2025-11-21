@@ -61,25 +61,6 @@ public static class AdvancedGoalPlanner
     }
 
     /// <summary>
-    /// Creates a delta dictionary with only the step effects.
-    /// Returns a lightweight delta instead of copying all facts.
-    /// </summary>
-    private static Dictionary<string, object> CreateStepDelta(State currentState, Step step)
-    {
-        // Only store the changes (delta), not the full state
-        var delta = new Dictionary<string, object>(step.Effects.Count);
-
-        foreach (var kvp in step.Effects)
-        {
-            delta[kvp.Key] = kvp.Value is Func<State, object> func
-                ? func(currentState)
-                : kvp.Value;
-        }
-
-        return delta;
-    }
-
-    /// <summary>
     /// Creates a successor state by applying a step to the current state.
     /// Uses layered state with parent pointer - only stores the delta to minimize allocations.
     /// </summary>
@@ -90,9 +71,14 @@ public static class AdvancedGoalPlanner
         double currentGCost,
         State goalState)
     {
-        // Create layered state: parent + delta (avoids copying all facts)
-        var delta = CreateStepDelta(currentState, step);
-        var newState = new State(currentState, delta);
+        var newState = currentState.Clone();
+
+        foreach (var kvp in step.Effects)
+        {
+            var resolvedValue = ResolveEffectValue(kvp.Value, currentState);
+            newState.Set(kvp.Key, resolvedValue);
+        }
+
         var newPath = new PathNode(step, currentPath); // O(1) instead of O(n)
 
         double stepCost = step.GetCost(currentState);
@@ -101,6 +87,31 @@ public static class AdvancedGoalPlanner
         float fScore = (float)newGCost + heuristic;
 
         return (newState, newPath, newGCost, fScore);
+    }
+
+    private static FactValue ResolveEffectValue(object rawValue, State referenceState)
+    {
+        return rawValue switch
+        {
+            FactValue fv => fv,
+            Func<State, FactValue> factFunc => factFunc(referenceState),
+            Func<State, object> objFunc => ConvertToFactValue(objFunc(referenceState)),
+            _ => ConvertToFactValue(rawValue)
+        };
+    }
+
+    private static FactValue ConvertToFactValue(object value)
+    {
+        return value switch
+        {
+            null => default,
+            FactValue fv => fv,
+            bool b => b,
+            int i => i,
+            float f => f,
+            double d => (float)d,
+            _ => throw new ArgumentException($"Unsupported fact value type {value?.GetType().Name}")
+        };
     }
 
     /// <summary>
@@ -168,7 +179,7 @@ public static class AdvancedGoalPlanner
             // Check if any effect contributes to any goal fact
             foreach (var goalFact in goalState.Facts)
             {
-                if (step.Effects.ContainsKey(goalFact.Key))
+                if (step.Effects.Any(e => e.Key == goalFact.Key))
                 {
                     relevant.Add(step);
                     queue.Enqueue(step);
@@ -190,9 +201,9 @@ public static class AdvancedGoalPlanner
 
                 // Does this step provide any precondition for current?
                 bool providesPrerequisite = false;
-                foreach (var precondition in current.Preconditions)
+                foreach (var precondition in current.Preconditions.Facts)
                 {
-                    if (step.Effects.ContainsKey(precondition.Key))
+                    if (step.Effects.Any(e => e.Key == precondition.Key))
                     {
                         providesPrerequisite = true;
                         break;

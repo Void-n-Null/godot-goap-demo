@@ -13,26 +13,37 @@ public sealed class Plan
 	public IReadOnlyList<Step> Steps => _steps.AsReadOnly();
 	private int _currentStepIndex = -1;
 	private IAction _currentAction;
-	private Dictionary<string, object> _worldFacts = new(); // Mutable facts for execution tracking
+	private State _currentState; 
 
-	public State CurrentState { get; private set; }
+	public State CurrentState => _currentState;
 	public bool IsComplete { get; private set; }
 	public bool Succeeded { get; private set; }
 
 	public Plan(IEnumerable<Step> steps, State initialState)
 	{
 		_steps = new List<Step>(steps ?? Array.Empty<Step>());
-		CurrentState = initialState?.Clone() ?? State.Empty();
-		_worldFacts = new Dictionary<string, object>(CurrentState.Facts); // Initial mutable facts
+		_currentState = initialState?.Clone() ?? State.Empty();
 		IsComplete = _steps.Count == 0;
-		Succeeded = IsComplete; // Empty plan is trivially succeeded
+		Succeeded = IsComplete;
 	}
 
-	public bool Tick(Entity agent, float dt)
+public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null)
 	{
 		if (IsComplete) return true;
 
-		// Check runtime guard validity for current action
+	if (goalSatisfied != null && goalSatisfied(agent))
+	{
+		GD.Print("Plan goal satisfied during tick, ending plan early.");
+		IsComplete = true;
+		Succeeded = true;
+		if (_currentAction != null)
+		{
+			_currentAction.Exit(agent, ActionExitReason.Completed);
+			_currentAction = null;
+		}
+		return true;
+	}
+
 		if (_currentAction is IRuntimeGuard guard && !guard.StillValid(agent))
 		{
 			GD.Print($"Plan step {_currentStepIndex} no longer valid, failing plan");
@@ -43,7 +54,6 @@ public sealed class Plan
 			return true;
 		}
 
-		// Advance to next step if current action done
 		if (_currentAction == null || _currentStepIndex < 0)
 		{
 			_currentStepIndex++;
@@ -55,19 +65,14 @@ public sealed class Plan
 			}
 
 			var step = _steps[_currentStepIndex];
-			GD.Print($"Plan starting step {_currentStepIndex}: {step.Preconditions.Count} preconditions, {step.Effects.Count} effects");
+			GD.Print($"Plan starting step {_currentStepIndex}");
 
 			_currentAction = step.CreateAction();
 			_currentAction.Enter(agent);
-			GD.Print($"{_currentStepIndex + 1}. {_currentAction.GetType().Name}");
 		}
 
-		var status = _currentAction.Update(agent, dt);  // Pass real dt to action
-		if (status != ActionStatus.Running){
-			GD.Print($"Step {_currentStepIndex} {_currentAction.GetType().Name} Update returned {status}");
-		}
+		var status = _currentAction.Update(agent, dt);
 		
-
 		if (status == ActionStatus.Running) return false;
 
 		var reason = status == ActionStatus.Succeeded ? ActionExitReason.Completed : ActionExitReason.Failed;
@@ -76,19 +81,34 @@ public sealed class Plan
 
 		if (status == ActionStatus.Succeeded)
 		{
-			// Apply effects to tracked facts
 			var step = _steps[_currentStepIndex];
 			GD.Print($"Step {_currentStepIndex} succeeded, applying {step.Effects.Count} effects");
-			foreach (var effect in step.Effects)
+			
+			foreach(var (key, val) in step.Effects)
 			{
-				object effectValue = effect.Value;
-				if (effect.Value is Func<State, object> func)
+				FactValue finalValue;
+				if (val is Func<State, FactValue> func)
 				{
-					effectValue = func(CurrentState);
+					finalValue = func(_currentState);
 				}
-				_worldFacts[effect.Key] = effectValue;
+				else if (val is FactValue fv)
+				{
+					finalValue = fv;
+				}
+				else
+				{
+					try 
+					{ 
+						// Slow fallback for legacy types
+						finalValue = (FactValue)(dynamic)val; 
+					} 
+					catch 
+					{ 
+						continue; 
+					}
+				}
+				_currentState.Set(key, finalValue);
 			}
-			CurrentState = new State(_worldFacts); // Update CurrentState
 		}
 		else
 		{
@@ -99,7 +119,24 @@ public sealed class Plan
 		}
 
 		_currentAction = null;
-		return _currentStepIndex >= _steps.Count - 1; // Continue if more steps
+
+	// Start next step on next tick, but if goal already satisfied, finish now
+	if (goalSatisfied != null && goalSatisfied(agent))
+	{
+		GD.Print("Plan goal satisfied after step completion, ending plan.");
+		IsComplete = true;
+		Succeeded = true;
+		return true;
+	}
+
+	if (_currentStepIndex >= _steps.Count - 1)
+	{
+		IsComplete = true;
+		Succeeded = true;
+		return true;
+	}
+
+	return false;
 	}
 
 	public void Cancel(Entity agent)
@@ -112,11 +149,8 @@ public sealed class Plan
 		_currentStepIndex = -1;
 		IsComplete = true;
 		Succeeded = false;
-		_worldFacts.Clear();
-		_worldFacts = new Dictionary<string, object>(CurrentState.Facts); // Reses
 	}
 
-	// Helper to check if goal satisfied
 	public bool SatisfiesGoal(State goal)
 	{
 		return CurrentState.Satisfies(goal);

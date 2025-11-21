@@ -5,6 +5,18 @@ using Godot;
 
 namespace Game.Data;
 
+public enum NPCGender
+{
+    Male,
+    Female
+}
+
+public enum NPCAgeGroup
+{
+    Child,
+    Adult
+}
+
 public class NPCData : IActiveComponent
 {
     const float DEFAULT_MAX = 100f;
@@ -22,6 +34,8 @@ public class NPCData : IActiveComponent
     public float Happiness { get; set; }
     public float MaxHappiness { get; set; } = DEFAULT_MAX;
     public float Temperature { get; set; }
+    public NPCGender Gender { get; set; } = NPCGender.Male;
+    public NPCAgeGroup AgeGroup { get; set; } = NPCAgeGroup.Adult;
     
 
     public void Update(double delta)

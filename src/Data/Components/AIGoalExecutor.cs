@@ -1,7 +1,6 @@
 using Godot;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Game.Data;
 using Game.Data.GOAP;
 using Game.Data.Components;
@@ -25,51 +24,75 @@ public class AIGoalExecutor : IActiveComponent
 	private IUtilityGoal _currentGoal;
 	private float timer = 0f;
 
-	// Cached world state to avoid expensive rebuilding every frame
-	private WorldStateCache _worldStateCache;
-	private const float STATE_CACHE_DURATION = 0.1f; // Cache for 100ms
+	private State _cachedState;
+	private State _lastPlanningState = new State();
+	private bool _stateDirty = true;
+	private float _lastStateBuildTime = -1000f;
 
-	// State change detection to avoid unnecessary planning
-	private Dictionary<string, object> _lastPlanningState;
 	private float _lastPlanningTime;
-	private const float MIN_PLANNING_INTERVAL = 1.0f; // Don't plan more than once per second
-	private bool _forceReplan; // Force immediate replan (bypasses rate limit and state change detection)
+	private const float MIN_PLANNING_INTERVAL = 1.0f; 
+	private bool _forceReplan; 
 
-	// Failure tracking to prevent tight replan loops
 	private int _consecutiveFailures;
-	private const int MAX_IMMEDIATE_RETRIES = 2; // After 2 failures, wait before retrying
+	private const int MAX_IMMEDIATE_RETRIES = 2; 
 
-	// Performance optimizations: cache enum values and string keys to avoid allocations
 	private static readonly TargetType[] _cachedTargetTypes = (TargetType[])Enum.GetValues(typeof(TargetType));
 	private static readonly string[] _cachedTargetTypeStrings;
-	private static readonly Dictionary<string, int> _targetTypeStringToIndex;
-	private string _cachedAgentId; // Cache agent ID string to avoid repeated ToString()
+	private static readonly int[] _nearFactIds;
+	private static readonly int[] _worldCountFactIds;
+	private static readonly int[] _worldHasFactIds;
+	private static readonly int[] _agentCountFactIds;
+	private static readonly int[] _agentHasFactIds;
+	private static readonly int[] _distanceFactIds;
+	private static readonly int HungerFactId;
+	private static readonly int IsHungryFactId;
+	
+	private bool[] _proximityNear;
+	private int[] _availabilityCounts;
+	private float[] _nearestDistances;
+	private bool _worldEventsSubscribed;
+	private ulong _lastProximityQueryFrame;
+	private Vector2 _lastProximityQueryPosition;
+	private bool _proximityRefreshPending;
 
-	// Reusable dictionary to eliminate allocation churn (CRITICAL: reduces Dictionary.set_Item overhead)
-	private Dictionary<string, object> _reusableFacts;
+	private float _lastProximityUpdate = -PROXIMITY_UPDATE_INTERVAL;
+	private const float PROXIMITY_UPDATE_INTERVAL = 0.25f;
+	private const float STATE_REBUILD_INTERVAL = 0.25f;
+	private const float DIRTY_REBUILD_INTERVAL = 0.05f;
+	private const float WORLD_EVENT_RADIUS = 2000f;
+	private const float WORLD_EVENT_RADIUS_SQ = WORLD_EVENT_RADIUS * WORLD_EVENT_RADIUS;
+	private const int MAX_PROXIMITY_RESULTS = 256;
+	private const int MAX_AVAILABLE_PER_TYPE = 6;
+	private static readonly bool PROFILE_BUILD_STATE = false;
 
-	// Proximity cache to reduce expensive spatial queries
-	private Dictionary<string, object> _cachedProximityFacts;
-	private float _lastProximityUpdate;
-	private const float PROXIMITY_UPDATE_INTERVAL = 0.2f; // Update proximity every 200ms instead of every frame
-
-	// Static constructor to initialize cached type strings
 	static AIGoalExecutor()
 	{
 		_cachedTargetTypeStrings = new string[_cachedTargetTypes.Length];
-		_targetTypeStringToIndex = new Dictionary<string, int>(_cachedTargetTypes.Length);
+		_nearFactIds = new int[_cachedTargetTypes.Length];
+		_worldCountFactIds = new int[_cachedTargetTypes.Length];
+		_worldHasFactIds = new int[_cachedTargetTypes.Length];
+		_agentCountFactIds = new int[_cachedTargetTypes.Length];
+		_agentHasFactIds = new int[_cachedTargetTypes.Length];
+		_distanceFactIds = new int[_cachedTargetTypes.Length];
+		HungerFactId = FactRegistry.GetId("Hunger");
+		IsHungryFactId = FactRegistry.GetId("IsHungry");
 
 		for (int i = 0; i < _cachedTargetTypes.Length; i++)
 		{
 			string typeName = _cachedTargetTypes[i].ToString();
 			_cachedTargetTypeStrings[i] = typeName;
-			_targetTypeStringToIndex[typeName] = i;
+			var type = _cachedTargetTypes[i];
+			_nearFactIds[i] = FactRegistry.GetId(FactKeys.NearTarget(type));
+			_worldCountFactIds[i] = FactRegistry.GetId(FactKeys.WorldCount(type));
+			_worldHasFactIds[i] = FactRegistry.GetId(FactKeys.WorldHas(type));
+			_agentCountFactIds[i] = FactRegistry.GetId(FactKeys.AgentCount(type));
+			_agentHasFactIds[i] = FactRegistry.GetId(FactKeys.AgentHas(type));
+			_distanceFactIds[i] = FactRegistry.GetId($"Distance_To_{type}");
 		}
 	}
 
-	// Events for the selector to listen to
-	public event Action<IUtilityGoal> OnCannotPlan; // "I couldn't even find a plan for this goal"
-	public event Action<IUtilityGoal> OnPlanExecutionFailed; // "I found a plan but it didn't work when I tried"
+	public event Action<IUtilityGoal> OnCannotPlan; 
+	public event Action<IUtilityGoal> OnPlanExecutionFailed; 
 	public event Action OnPlanSucceeded;
 	public event Action OnGoalSatisfied;
 	public event Action OnNeedNewGoal;
@@ -79,23 +102,17 @@ public class AIGoalExecutor : IActiveComponent
 		if (_currentGoal != goal)
 		{
 			_currentGoal = goal;
-			// Cancel current plan when goal changes
 			_currentPlan = null;
-			_worldStateCache = null;
-			_cachedProximityFacts?.Clear(); // Invalidate proximity cache when goal changes
+			_stateDirty = true;
 		}
 	}
 
 	public void Update(double delta)
 	{
-		// Use cached state if available and not expired, otherwise rebuild
 		float currentTime = timer / 1000.0f;
 		timer += (float)delta;
 
-		// Build current state (pure facts only, no Agent/World)
-		var currentState = (_worldStateCache != null && !_worldStateCache.IsExpired(currentTime, STATE_CACHE_DURATION))
-			? new State(_worldStateCache.CachedFacts)
-			: BuildCurrentState();
+		var currentState = GetOrBuildState(currentTime);
 
 		// Handle async planning completion
 		if (_planningInProgress && _planningTask != null)
@@ -109,33 +126,37 @@ public class AIGoalExecutor : IActiveComponent
 				if (_currentPlan != null && _currentPlan.Steps.Count > 0)
 				{
 					GD.Print($"[{Entity.Name}] New plan for '{_currentGoal?.Name}': {_currentPlan.Steps.Count} steps");
-					_consecutiveFailures = 0; // Reset on successful planning
+					_consecutiveFailures = 0; 
 				}
 				else
 				{
-					// Planning succeeded but no plan found - goal is impossible right now
-					GD.Print($"[{Entity.Name}] Cannot plan for '{_currentGoal?.Name}' - no valid path to goal");
+					string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
+					string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
+					GD.Print($"[{nameFirstWord} {idFirst6}] Cannot plan for '{_currentGoal?.Name}' - no valid path to goal");
 					var failedGoal = _currentGoal;
 					_currentGoal = null;
 					_currentPlan = null;
-					_consecutiveFailures = 0; // Reset when giving up on goal
+					_consecutiveFailures = 0;
+					_stateDirty = true;
 					OnCannotPlan?.Invoke(failedGoal);
 					return;
 				}
 			}
 			else if (_planningTask.IsFaulted)
 			{
-				GD.Print($"[{Entity.Name}] Planning error for '{_currentGoal?.Name}': {_planningTask.Exception?.Message}");
+				string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
+				string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
+				GD.Print($"[{nameFirstWord} {idFirst6}] Planning error for '{_currentGoal?.Name}': {_planningTask.Exception?.Message}");
 				var failedGoal = _currentGoal;
 				_currentGoal = null;
 				_planningInProgress = false;
 				_planningTask = null;
+				_stateDirty = true;
 				OnCannotPlan?.Invoke(failedGoal);
 				return;
 			}
 		}
 
-		// Check if current goal is satisfied
 		if (_currentGoal != null && _currentGoal.IsSatisfied(Entity))
 		{
 			_currentPlan = null;
@@ -144,14 +165,12 @@ public class AIGoalExecutor : IActiveComponent
 			return;
 		}
 
-		// Request new goal if we don't have one
 		if (_currentGoal == null)
 		{
 			OnNeedNewGoal?.Invoke();
 			return;
 		}
 
-		// Replan if no plan and have a goal
 		if ((_currentPlan == null || _currentPlan.IsComplete) && _currentGoal != null && !_planningInProgress)
 		{
 			if (_currentPlan?.Succeeded == true)
@@ -160,58 +179,60 @@ public class AIGoalExecutor : IActiveComponent
 			}
 
 			float planningTime = Time.GetTicksMsec() / 1000.0f;
-
-			// Skip rate limit and state change checks if forced replan (e.g., after plan failure)
 			bool shouldPlan = _forceReplan;
 
 			if (!shouldPlan)
 			{
-				// Rate limit planning
 				if (planningTime - _lastPlanningTime < MIN_PLANNING_INTERVAL)
 				{
 					return;
 				}
-
-				// Check if world state has meaningfully changed
-				shouldPlan = HasWorldStateChangedSignificantly(currentState.Facts);
+				shouldPlan = HasWorldStateChangedSignificantly(currentState);
 			}
 
 			if (shouldPlan)
 			{
 				_planningInProgress = true;
-				// Reuse planning state dictionary if possible
-				if (_lastPlanningState == null)
-					_lastPlanningState = new Dictionary<string, object>(currentState.Facts);
-				else
-				{
-					_lastPlanningState.Clear();
-					foreach (var kvp in currentState.Facts)
-						_lastPlanningState[kvp.Key] = kvp.Value;
-				}
+				
+				// Clone current state to last planning state
+				_lastPlanningState = currentState.Clone();
+				
 				_lastPlanningTime = planningTime;
-				_forceReplan = false; // Reset force flag
+				_forceReplan = false; 
 
 				var goalState = _currentGoal.GetGoalState(Entity);
-				_planningTask = AdvancedGoalPlanner.ForwardPlanAsync(currentState, goalState);
+				// Need to pass a clone because planner might mutate it during search (or A* node expansion)
+				_planningTask = AdvancedGoalPlanner.ForwardPlanAsync(currentState.Clone(), goalState);
 			}
 		}
 
-		// Execute current plan
 		if (_currentPlan != null && !_currentPlan.IsComplete)
 		{
-			var tickResult = _currentPlan.Tick(Entity, (float)delta);
-
-			// Clear world state cache when plan makes changes
-			if (tickResult && _currentPlan.Succeeded)
+			Func<Entity, bool> goalChecker = null;
+			if (_currentGoal != null)
 			{
-				_worldStateCache = null;
+				goalChecker = (agent) =>
+				{
+					try
+					{
+						return _currentGoal.IsSatisfied(agent);
+					}
+					catch (Exception ex)
+					{
+						GD.PushError($"Goal satisfaction check failed: {ex.Message}");
+						return false;
+					}
+				};
 			}
+
+			var tickResult = _currentPlan.Tick(Entity, (float)delta, goalChecker);
 
 			if (tickResult)
 			{
 				if (_currentPlan.Succeeded)
 				{
-					// Plan succeeded, reset failure counter
+					_currentPlan = null;
+					_stateDirty = true;
 					_consecutiveFailures = 0;
 					OnPlanSucceeded?.Invoke();
 				}
@@ -220,17 +241,11 @@ public class AIGoalExecutor : IActiveComponent
 					GD.Print($"[{Entity.Name}] Plan execution failed for '{_currentGoal?.Name}'");
 					var failedGoal = _currentGoal;
 					_currentPlan = null;
-					_worldStateCache = null;
-					_cachedProximityFacts?.Clear(); // Invalidate proximity cache on failure
+					_stateDirty = true;
 					_consecutiveFailures++;
 
-					// Only force immediate replan for first few failures
-					// After that, respect rate limits to avoid tight replan loops
-					if (_consecutiveFailures <= MAX_IMMEDIATE_RETRIES)
-					{
-						_forceReplan = true;
-					}
-					else
+					_forceReplan = true;
+					if (_consecutiveFailures > MAX_IMMEDIATE_RETRIES)
 					{
 						GD.Print($"[{Entity.Name}] Too many consecutive failures ({_consecutiveFailures}), waiting before retry");
 					}
@@ -244,29 +259,35 @@ public class AIGoalExecutor : IActiveComponent
 
 	public void OnStart()
 	{
-		// Cache agent ID string once to avoid repeated ToString() calls
-		_cachedAgentId = Entity.Id.ToString();
-
-		// Pre-allocate dictionaries to eliminate GC pressure
-		// Typical fact count: ~20-30 facts per agent
-		_reusableFacts = new Dictionary<string, object>(32);
-		_cachedProximityFacts = new Dictionary<string, object>(16);
+		_cachedState ??= new State();
+		_proximityNear ??= new bool[_cachedTargetTypes.Length];
+		_availabilityCounts ??= new int[_cachedTargetTypes.Length];
+		_nearestDistances ??= new float[_cachedTargetTypes.Length];
+		SubscribeToWorldEvents();
 	}
 
 	public void OnPostAttached()
 	{
-		// No-op
 	}
 
-	private bool HasWorldStateChangedSignificantly(IReadOnlyDictionary<string, object> currentFacts)
+	public void OnDetached()
 	{
-		if (_lastPlanningState == null)
-			return true;
+		if (_worldEventsSubscribed)
+		{
+			WorldEventBus.Instance.EntitySpawned -= OnWorldTargetEntityChanged;
+			WorldEventBus.Instance.EntityDespawned -= OnWorldTargetEntityChanged;
+			_worldEventsSubscribed = false;
+		}
+	}
 
-		// Check key facts that would affect planning decisions
+	private bool HasWorldStateChangedSignificantly(State currentState)
+	{
+        // Compare currentState with _lastPlanningState
+        // We can iterate key facts we care about.
+        
 		var keyFacts = new[] {
 			FactKeys.AgentCount(TargetType.Stick),
-			FactKeys.WorldCount(TargetType.Stick),  // Now counts unreserved sticks!
+			FactKeys.WorldCount(TargetType.Stick),  
 			FactKeys.WorldHas(TargetType.Stick),
 			FactKeys.WorldCount(TargetType.Tree),
 			FactKeys.WorldHas(TargetType.Tree),
@@ -277,10 +298,15 @@ public class AIGoalExecutor : IActiveComponent
 
 		foreach (var key in keyFacts)
 		{
-			var currentValue = currentFacts.GetValueOrDefault(key);
-			var lastValue = _lastPlanningState.GetValueOrDefault(key);
+			bool currentHas = currentState.TryGet(key, out var currentVal);
+			bool lastHas = _lastPlanningState.TryGet(key, out var lastVal);
 
-			if (!object.Equals(currentValue, lastValue))
+			if (currentHas != lastHas)
+			{
+				return true;
+			}
+
+			if (currentHas && currentVal != lastVal)
 			{
 				return true;
 			}
@@ -289,114 +315,219 @@ public class AIGoalExecutor : IActiveComponent
 		return false;
 	}
 
-	private State BuildCurrentState()
+	private State GetOrBuildState(float currentTime)
 	{
-		// CRITICAL: Reuse dictionary to eliminate allocation overhead
-		var facts = _reusableFacts;
-		facts.Clear();
-
-		// Add agent metadata
-		if (Entity.TryGetComponent<TransformComponent2D>(out var transform))
+		if (_cachedState == null)
 		{
-			facts[FactKeys.Position] = transform.Position;
-		}
-		facts[FactKeys.AgentId] = _cachedAgentId;
-
-		if (Entity.TryGetComponent<NPCData>(out var npcData))
-			AddNPCFacts(facts, npcData, _cachedTargetTypes);
-
-		// OPTIMIZED: Cache proximity facts and only update every PROXIMITY_UPDATE_INTERVAL
-		// This dramatically reduces expensive QueryCircle + IsAvailableFor calls
-		float currentTime = timer / 1000.0f;
-		bool shouldUpdateProximity = _cachedProximityFacts.Count == 0 || (currentTime - _lastProximityUpdate) >= PROXIMITY_UPDATE_INTERVAL;
-
-		if (shouldUpdateProximity && Entity.TryGetComponent<TransformComponent2D>(out var agentTransform))
-		{
-			_cachedProximityFacts.Clear();
-			AddProximityAndAvailabilityFacts(_cachedProximityFacts, agentTransform, Entity, _cachedTargetTypes, _cachedTargetTypeStrings);
-			_lastProximityUpdate = currentTime;
+			_cachedState = new State();
+			_stateDirty = true;
 		}
 
-		// Merge cached proximity facts into current state
-		if (_cachedProximityFacts.Count > 0)
+		float interval = _stateDirty ? DIRTY_REBUILD_INTERVAL : STATE_REBUILD_INTERVAL;
+		if ((currentTime - _lastStateBuildTime) >= interval)
 		{
-			foreach (var kvp in _cachedProximityFacts)
+			BuildCurrentState(currentTime);
+		}
+
+		return _cachedState;
+	}
+
+	private void SubscribeToWorldEvents()
+	{
+		if (_worldEventsSubscribed) return;
+		WorldEventBus.Instance.EntitySpawned += OnWorldTargetEntityChanged;
+		WorldEventBus.Instance.EntityDespawned += OnWorldTargetEntityChanged;
+		_worldEventsSubscribed = true;
+	}
+
+	private void OnWorldTargetEntityChanged(Entity entity)
+	{
+		if (entity == null) return;
+		// Fast check using new HasComponent logic
+		if (!entity.HasComponent<TargetComponent>()) return;
+
+		// Ignore far away events so one new campfire doesn't reset the entire population
+		if (Entity.TryGetComponent<TransformComponent2D>(out var selfTransform) &&
+		    entity.TryGetComponent<TransformComponent2D>(out var eventTransform))
+		{
+			if (selfTransform.Position.DistanceSquaredTo(eventTransform.Position) > WORLD_EVENT_RADIUS_SQ)
 			{
-				facts[kvp.Key] = kvp.Value;
+				return;
 			}
 		}
 
+		_stateDirty = true;
+		_lastStateBuildTime = float.NegativeInfinity; // force immediate rebuild next tick
+		_forceReplan = true;
+		_proximityRefreshPending = true;
 
-		// Cache the state
-		float cacheTime = timer / 1000.0f;
-		_worldStateCache = new WorldStateCache(facts, cacheTime);
-
-		return new State(facts);
+		if (_currentPlan != null && !_currentPlan.IsComplete)
+		{
+			// Need target component to check invalidation
+			if (!entity.TryGetComponent<TargetComponent>(out var targetComp)) return;
+			
+			var currentGoalState = _currentGoal?.GetGoalState(Entity);
+			if (currentGoalState != null && GoalReferencesTarget(currentGoalState, targetComp.Target))
+			{
+				GD.Print($"[{Entity.Name}] World event for {targetComp.Target} invalidated current plan, cancelling.");
+				_currentPlan.Cancel(Entity);
+			}
+		}
 	}
 
-	private static void AddProximityAndAvailabilityFacts(Dictionary<string, object> facts, TransformComponent2D agentTransform,
-		                              Entity agent, TargetType[] cachedTargetTypes, string[] cachedTargetTypeStrings)
+	private bool GoalReferencesTarget(State goalState, TargetType targetType)
+	{
+		var nearKey = FactKeys.NearTarget(targetType);
+		var worldHasKey = FactKeys.WorldHas(targetType);
+		var worldCountKey = FactKeys.WorldCount(targetType);
+
+		return goalState.TryGet(nearKey, out _) ||
+		       goalState.TryGet(worldHasKey, out _) ||
+		       goalState.TryGet(worldCountKey, out _);
+	}
+
+	private void BuildCurrentState(float currentTime)
+	{
+		ulong startTicks = PROFILE_BUILD_STATE ? Time.GetTicksMsec() : 0UL;
+
+		_cachedState.Clear();
+
+		if (Entity.TryGetComponent<NPCData>(out var npcData))
+		{
+			AddNPCFacts(_cachedState, npcData);
+		}
+
+		// Force proximity update when rebuilding state to ensure freshness
+		if (Entity.TryGetComponent<TransformComponent2D>(out var agentTransform))
+		{
+			UpdateProximityAndAvailability(agentTransform, Entity);
+			_lastProximityUpdate = currentTime;
+			_lastProximityQueryFrame = FrameTime.FrameIndex;
+			_lastProximityQueryPosition = agentTransform.Position;
+			_proximityRefreshPending = false;
+		}
+
+		ApplyProximityFacts(_cachedState);
+
+		_lastStateBuildTime = currentTime;
+		_stateDirty = false;
+
+		if (PROFILE_BUILD_STATE)
+		{
+			var elapsed = Time.GetTicksMsec() - startTicks;
+			GD.Print($"[AIGoalExecutor] BuildCurrentState ({Entity.Name}) took {elapsed} ms");
+		}
+	}
+
+	private void UpdateProximityAndAvailability(TransformComponent2D agentTransform, Entity agent)
 	{
 		var agentPos = agentTransform.Position;
-		const float searchRadius = 5000f; // Match movement action search radius
+		const float searchRadius = 5000f; 
 
-		// Pre-allocate arrays to track proximity and availability
-		Span<bool> hasNearby = stackalloc bool[cachedTargetTypes.Length];
-		Span<int> availableCount = stackalloc int[cachedTargetTypes.Length];
+		Array.Fill(_proximityNear, false);
+		Array.Clear(_availabilityCounts, 0, _availabilityCounts.Length);
+		for (int i = 0; i < _nearestDistances.Length; i++)
+		{
+			_nearestDistances[i] = float.MaxValue;
+		}
 
-		// SINGLE spatial query for both proximity (64 units) and availability (5000 units)
-		var nearbyEntities = Universe.EntityManager.Instance?.SpatialPartition?.QueryCircle(agentPos, searchRadius);
+		// Optimized Query: Use HasComponent (O(1) for sealed)
+		var nearbyEntities = Universe.EntityManager.Instance?.SpatialPartition?.QueryCircle(
+			agentPos,
+			searchRadius,
+			e => e.HasComponent<TargetComponent>(), 
+			MAX_PROXIMITY_RESULTS);
 
 		if (nearbyEntities != null)
 		{
 			var reservationManager = Universe.ResourceReservationManager.Instance;
+			int targetTypeCount = _cachedTargetTypes.Length;
+			const float nearDistSq = 64f * 64f;
 
-			// Single pass through entities - compute BOTH proximity AND availability
+			// Use indexed access to avoid enumerator allocation? List<T>.Enumerator is struct, so it's fine.
 			foreach (var entity in nearbyEntities)
 			{
-				float distance = agentPos.DistanceTo(entity.Transform?.Position ?? agentPos);
-				bool isNear = distance <= 64f;
-				bool isAvailable = reservationManager.IsAvailableFor(entity, agent);
+				if (!entity.TryGetComponent<TargetComponent>(out var tc)) continue;
+				
+				// Optimization: Map Enum directly to index
+				int typeIndex = (int)tc.Target;
+				if (typeIndex < 0 || typeIndex >= targetTypeCount) continue;
 
-				// Check if entity has a TargetComponent
-				if (entity.TryGetComponent<TargetComponent>(out var tc))
+				// Optimization: Use squared distance to avoid Sqrt until necessary
+				float distSq = agentPos.DistanceSquaredTo(entity.Transform?.Position ?? agentPos);
+
+				if (distSq <= nearDistSq)
 				{
-					for (int i = 0; i < cachedTargetTypes.Length; i++)
-					{
-						if (tc.Target == cachedTargetTypes[i])
-						{
-							if (isNear) hasNearby[i] = true;
-							if (isAvailable) availableCount[i]++;
-							break;
-						}
-					}
+					_proximityNear[typeIndex] = true;
+				}
+
+				// HOT PATH OPTIMIZATION: Uses Entity.ReservedByAgentId (O(1))
+				bool isAvailable = reservationManager.IsAvailableFor(entity, agent);
+				if (isAvailable && _availabilityCounts[typeIndex] < MAX_AVAILABLE_PER_TYPE)
+				{
+					_availabilityCounts[typeIndex]++;
+				}
+
+				// Only Sqrt if we have a new candidate for nearest
+				// Use distSq for comparison
+				if (distSq < _nearestDistances[typeIndex] * _nearestDistances[typeIndex])
+				{
+					_nearestDistances[typeIndex] = MathF.Sqrt(distSq);
+				}
+			}
+		}
+	}
+
+	private void ApplyProximityFacts(State state)
+	{
+		for (int i = 0; i < _cachedTargetTypes.Length; i++)
+		{
+			state.Set(_nearFactIds[i], _proximityNear[i]);
+			state.Set(_worldCountFactIds[i], _availabilityCounts[i]);
+			state.Set(_worldHasFactIds[i], _availabilityCounts[i] > 0);
+
+			if (_nearestDistances[i] < float.MaxValue)
+			{
+				state.Set(_distanceFactIds[i], _nearestDistances[i]);
+			}
+		}
+	}
+
+	private void AddNPCFacts(State state, NPCData npcData)
+	{
+		for (int i = 0; i < _cachedTargetTypes.Length; i++)
+		{
+			int agentCount = npcData.Resources.GetValueOrDefault(_cachedTargetTypes[i], 0);
+
+			state.Set(_agentCountFactIds[i], agentCount);
+			state.Set(_agentHasFactIds[i], agentCount > 0);
+		}
+
+		state.Set(HungerFactId, npcData.Hunger);
+		state.Set(IsHungryFactId, npcData.Hunger > 30f); // Explicit boolean for simple preconditions
+	}
+
+	private bool ShouldRefreshProximity(float currentTime)
+	{
+		if (FrameTime.FrameIndex == _lastProximityQueryFrame && !_proximityRefreshPending)
+		{
+			return false;
+		}
+
+		bool intervalElapsed = (currentTime - _lastProximityUpdate) >= PROXIMITY_UPDATE_INTERVAL;
+
+		if (!intervalElapsed && !_proximityRefreshPending)
+		{
+			if (Entity.TryGetComponent<TransformComponent2D>(out var transform))
+			{
+				float distanceMoved = transform.Position.DistanceTo(_lastProximityQueryPosition);
+				if (distanceMoved < 128f)
+				{
+					return false;
 				}
 			}
 		}
 
-		// Set facts based on results
-		for (int i = 0; i < cachedTargetTypes.Length; i++)
-		{
-			facts[FactKeys.NearTarget(cachedTargetTypes[i])] = hasNearby[i];
-			facts[FactKeys.WorldCount(cachedTargetTypes[i])] = availableCount[i];
-			facts[FactKeys.WorldHas(cachedTargetTypes[i])] = availableCount[i] > 0;
-		}
-	}
-
-	private static void AddNPCFacts(Dictionary<string, object> facts, NPCData npcData, TargetType[] cachedTargetTypes)
-	{
-		// Add agent inventory facts
-		// NOTE: WorldCount/WorldHas are now set by AddProximityAndAvailabilityFacts (reservation-aware)
-		for (int i = 0; i < cachedTargetTypes.Length; i++)
-		{
-			var rt = cachedTargetTypes[i];
-			int agentCount = npcData.Resources.GetValueOrDefault(rt, 0);
-
-			facts[FactKeys.AgentCount(rt)] = agentCount;
-			facts[FactKeys.AgentHas(rt)] = agentCount > 0;
-		}
-
-		// Add hunger to facts for goal evaluation
-		facts["Hunger"] = npcData.Hunger;
+		return true;
 	}
 }

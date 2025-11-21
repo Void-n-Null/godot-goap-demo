@@ -1,7 +1,6 @@
 using Godot;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using Game.Data;
 using Game.Data.Components;
 using Game.Data.UtilityAI;
@@ -42,7 +41,9 @@ public class UtilityGoalSelector : IActiveComponent
 
 	private void OnExecutorCannotPlan(IUtilityGoal goal)
 	{
-		GD.Print($"[{Entity.Name}] Executor couldn't find plan for '{goal.Name}', applying {PLAN_FAILURE_COOLDOWN}s cooldown");
+		string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
+		string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
+		GD.Print($"[{nameFirstWord} {idFirst6}] Executor couldn't find plan for '{goal.Name}', applying {PLAN_FAILURE_COOLDOWN}s cooldown");
 		_goalPlanFailureCooldowns[goal] = Time.GetTicksMsec() / 1000.0f + PLAN_FAILURE_COOLDOWN;
 		_currentGoal = null;
 		EvaluateAndSelectGoal();
@@ -50,8 +51,23 @@ public class UtilityGoalSelector : IActiveComponent
 
 	private void OnExecutorPlanExecutionFailed(IUtilityGoal goal)
 	{
-		GD.Print($"[{Entity.Name}] Executor's plan execution failed for '{goal.Name}', applying {EXECUTION_FAILURE_COOLDOWN}s cooldown");
-		_goalExecutionFailureCooldowns[goal] = Time.GetTicksMsec() / 1000.0f + EXECUTION_FAILURE_COOLDOWN;
+		string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
+		string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
+		GD.Print($"[{nameFirstWord} {idFirst6}] Executor's plan execution failed for '{goal.Name}', applying {EXECUTION_FAILURE_COOLDOWN}s cooldown");
+
+		// If the goal immediately regained high utility (e.g. new campfire spawned while walking),
+		// retry it right away instead of enforcing a cooldown.
+		float utility = goal.CalculateUtility(Entity);
+		if (utility >= 0.5f)
+		{
+			GD.Print($"[{nameFirstWord} {idFirst6}] Goal '{goal.Name}' still urgent (utility {utility:F2}), retrying immediately");
+			_goalExecutionFailureCooldowns.Remove(goal);
+		}
+		else
+		{
+			_goalExecutionFailureCooldowns[goal] = Time.GetTicksMsec() / 1000.0f + EXECUTION_FAILURE_COOLDOWN;
+		}
+
 		_currentGoal = null;
 		EvaluateAndSelectGoal();
 	}
@@ -116,27 +132,35 @@ public class UtilityGoalSelector : IActiveComponent
 		if (_availableGoals.Count == 0) return;
 		if (_executor == null) return;
 
-		// Calculate utility for each goal, excluding those on cooldown
-		var goalUtilities = _availableGoals
-			.Where(g => !IsGoalOnCooldown(g))
-			.Select(g => new { Goal = g, Utility = g.CalculateUtility(Entity) })
-			.OrderByDescending(x => x.Utility)
-			.ToList();
+		IUtilityGoal bestGoal = null;
+		float bestUtility = float.MinValue;
 
-		if (goalUtilities.Count == 0)
+		for (int i = 0; i < _availableGoals.Count; i++)
+		{
+			var goal = _availableGoals[i];
+			if (IsGoalOnCooldown(goal))
+				continue;
+
+			float utility = goal.CalculateUtility(Entity);
+			if (utility > bestUtility)
+			{
+				bestUtility = utility;
+				bestGoal = goal;
+			}
+		}
+
+		if (bestGoal == null)
 		{
 			GD.Print($"[{Entity.Name}] All goals are on cooldown, nothing to do!");
 			_currentGoal = null;
 			return;
 		}
 
-		var bestGoal = goalUtilities.First();
-
 		// Always switch to best available goal if current is null or different with significant utility
-		if (_currentGoal == null || (_currentGoal != bestGoal.Goal && bestGoal.Utility > 0.05f))
+		if (_currentGoal == null || (_currentGoal != bestGoal && bestUtility > 0.05f))
 		{
 			var oldGoal = _currentGoal?.Name ?? "None";
-			_currentGoal = bestGoal.Goal;
+			_currentGoal = bestGoal;
 			
 			// Bestow the new goal upon the executor
 			_executor.SetGoal(_currentGoal);
