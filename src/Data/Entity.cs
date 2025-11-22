@@ -16,7 +16,7 @@ public class Entity : IUpdatableEntity
 	/// <summary>
 	/// Unique entity ID for component lookup and debugging.
 	/// </summary>
-	public Guid Id { get; } = Guid.NewGuid();
+	public Guid Id { get; } = EntityIdGenerator.Next();
 
 	/// <summary>
 	/// Direct index into the SpatialQuadTree's internal element array.
@@ -283,7 +283,7 @@ public class Entity : IUpdatableEntity
 			if (component.Entity != this) continue;
 
 			component.OnPostAttached();
-			if (component is IActiveComponent active && !_activeComponents.Contains(active))
+			if (component is IActiveComponent active)
 			{
 				_activeComponents.Add(active);
 			}
@@ -398,11 +398,19 @@ public class Entity : IUpdatableEntity
 	public bool HasComponent(Type componentType) => GetComponent(componentType) != null;
 
 	/// <summary>
-	/// Enumerates all components attached to this entity.
+	/// Enumerates all components attached to this entity without extra iterator allocations.
 	/// </summary>
 	public IEnumerable<IComponent> GetAllComponents()
 	{
-		return _fastComponents.Where(c => c != null);
+		var comps = _fastComponents;
+		for (int i = 0; i < comps.Length; i++)
+		{
+			var component = comps[i];
+			if (component != null)
+			{
+				yield return component;
+			}
+		}
 	}
 
 	/// <summary>

@@ -1,43 +1,55 @@
 using Godot;
 using System;
-using System.IO;
-using FileAccess = Godot.FileAccess;
+using System.Collections.Concurrent;
 
 namespace Game.Utils;
 
 public static class Resources
 {
-    private static T GetResource<T>(string path) where T : Resource
-    {
-        //Do some validation that the path is something godot can actually load
-        if (!path.StartsWith("res://"))
-        {
-            path = "res://" + path;
-        }
+	private static readonly ConcurrentDictionary<(Type type, string path), Resource> _cache = new();
 
-        return GD.Load<T>(path);
-    }
+	private static string NormalizePath(string path)
+	{
+		if (string.IsNullOrWhiteSpace(path))
+		{
+			throw new ArgumentException("Resource path cannot be null or empty.", nameof(path));
+		}
 
-    public static Texture2D GetTexture(string path)
-    {
-        return GetResource<Texture2D>(path);
-    }
+		var normalized = path.Replace('\\', '/');
+		if (!normalized.StartsWith("res://", StringComparison.Ordinal))
+		{
+			normalized = "res://" + normalized.TrimStart('/');
+		}
 
-    public static PackedScene GetScene(string path)
-    {
-        return GetResource<PackedScene>(path);
-    }
+		return normalized;
+	}
 
-    public static AudioStream GetAudioStream(string path)
-    {
-        return GetResource<AudioStream>(path);
-    }
+	private static T GetResource<T>(string path) where T : Resource
+	{
+		var normalized = NormalizePath(path);
+		var key = (typeof(T), normalized);
 
+		if (_cache.TryGetValue(key, out var cached) && cached is T typed)
+		{
+			return typed;
+		}
 
-    public static AudioStreamMP3 GetAudioStreamMP3(string path)
-    {
-        return GetResource<AudioStreamMP3>(path);
-    }
-    
-    
+		var resource = GD.Load<T>(normalized);
+		if (resource != null)
+		{
+			_cache[key] = resource;
+		}
+
+		return resource;
+	}
+
+	public static Texture2D GetTexture(string path) => GetResource<Texture2D>(path);
+
+	public static PackedScene GetScene(string path) => GetResource<PackedScene>(path);
+
+	public static AudioStream GetAudioStream(string path) => GetResource<AudioStream>(path);
+
+	public static AudioStreamMP3 GetAudioStreamMP3(string path) => GetResource<AudioStreamMP3>(path);
+
+	public static void ClearCache() => _cache.Clear();
 }

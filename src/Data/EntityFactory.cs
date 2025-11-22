@@ -42,26 +42,29 @@ public static class EntityFactory
 			Blueprint = blueprint
 		};
 
-		// Add tags
+		// Add tags (order-preserving, root -> leaf)
 		foreach (var tag in blueprint.GetAllTags())
+		{
 			entity.AddTag(tag);
+		}
 
 		// Components (respect duplicate policy)
 		var seenTypes = new HashSet<Type>();
-		var warnedTypes = new HashSet<Type>();
+		HashSet<Type>? warnedTypes = null;
 		foreach (var comp in blueprint.CreateAllComponents())
 		{
 			var t = comp.GetType();
-			var policy = blueprint.GetDuplicatePolicy(t);
-			if (seenTypes.Contains(t))
+			bool alreadySeen = !seenTypes.Add(t);
+			if (alreadySeen)
 			{
+				var policy = blueprint.GetDuplicatePolicy(t);
 				switch (policy)
 				{
 					case DuplicatePolicy.Prohibit:
-						if (!warnedTypes.Contains(t))
+						warnedTypes ??= new HashSet<Type>();
+						if (warnedTypes.Add(t))
 						{ 
 							options.LogWarning?.Invoke($"EntityFactory: Duplicate component {t.Name} in blueprint '{blueprint.Name}' prohibited; skipping.");
-							warnedTypes.Add(t);
 						}
 						continue;
 					case DuplicatePolicy.Replace:
@@ -71,16 +74,10 @@ public static class EntityFactory
 			}
 
 			entity.AddComponent(comp);
-			seenTypes.Add(t);
 		}
 
-		var allMutators = new List<Action<Entity>>(blueprint.GetAllMutators());
-		if (additionalMutators != null && additionalMutators.Length > 0)
-			allMutators.AddRange(additionalMutators);
-		
-
-		// Run blueprint mutators (root -> leaf) prior to post-attach
-		entity.ApplyMutators(allMutators, options);
+		// Run blueprint + additional mutators (root -> leaf) prior to post-attach
+		entity.ApplyMutators(blueprint.EnumerateMutators(additionalMutators), options);
 
 		// Validate required component dependencies before initialization
 		ValidateRequiredComponents(entity, blueprint, options);
@@ -90,7 +87,7 @@ public static class EntityFactory
 		return entity;
 	}
 
-	private static void ApplyMutators(this Entity entity, IReadOnlyList<Action<Entity>> mutators, EntityCreateOptions options)
+	private static void ApplyMutators(this Entity entity, IEnumerable<Action<Entity>> mutators, EntityCreateOptions options)
 	{
 		foreach (var mutate in mutators)
 		{
@@ -147,12 +144,19 @@ public static class EntityFactory
 			foreach (var c in comps) yield return c;
 		}
 	}
-	private static IEnumerable<Action<Entity>> GetAllMutators(this EntityBlueprint blueprint)
+	private static IEnumerable<Action<Entity>> EnumerateMutators(this EntityBlueprint blueprint, Action<Entity>[]? additionalMutators)
 	{
 		foreach (var bp in blueprint.EnumerateRootToLeaf())
 		{
 			if (bp.Mutators == null) continue;
 			foreach (var m in bp.Mutators) yield return m;
+		}
+
+		if (additionalMutators == null) yield break;
+
+		for (int i = 0; i < additionalMutators.Length; i++)
+		{
+			yield return additionalMutators[i];
 		}
 	}
 
