@@ -1,3 +1,5 @@
+using Game.Data;
+using Game.Data.Components;
 using Game.Utils;
 using Godot;
 
@@ -24,6 +26,9 @@ public partial class CameraController2D : Camera2D
 	[Export] public float InertiaMinSpeed = 10.0f; // world-units/sec below which inertia is ignored
 	[Export] public float InertiaMaxSpeed = 20000.0f; // clamp world-units/sec to avoid spikes
 
+	// Follow target config
+	[Export] public float FollowSmoothSpeed = 5.0f; // exponential smoothing for follow
+
 	private const float MinDelta = 1e-4f;
 	private const float SnapEpsilon = 0.0005f;
 
@@ -46,6 +51,9 @@ public partial class CameraController2D : Camera2D
 	private bool _inertiaActive;
 	private Vector2 _inertiaVelocity = Vector2.Zero;
 
+	// Follow target state
+	private Entity _followTarget;
+
 	public override void _Ready()
 	{
 		base._Ready();
@@ -60,18 +68,18 @@ public partial class CameraController2D : Camera2D
 		switch (@event)
 		{
 			case InputEventMouseButton mouse:
-			{
-				if (mouse.ButtonIndex == PanButton)
-					if (mouse.Pressed) 
-						HandleDragStart(); 
-					else 
-						HandleDragEnd();
+				{
+					if (mouse.ButtonIndex == PanButton)
+						if (mouse.Pressed)
+							HandleDragStart();
+						else
+							HandleDragEnd();
 
-				// Zoom: WheelUp zooms in (decrease scalar), WheelDown zooms out (increase scalar)
-				if (mouse.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
-					HandleZooming(mouse);   
-				break;
-			}
+					// Zoom: WheelUp zooms in (decrease scalar), WheelDown zooms out (increase scalar)
+					if (mouse.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
+						HandleZooming(mouse);
+					break;
+				}
 			// Allow ESC to cancel an active drag (future: bind to a custom action)
 			case InputEventKey { Echo: false, Pressed: true, Keycode: Key.Escape }:
 				HandleHardDragEnd();
@@ -103,15 +111,20 @@ public partial class CameraController2D : Camera2D
 		}
 	}
 
-	private void HandleDragStart(){
+	private void HandleDragStart()
+	{
 		_isDragging = true;
 		_dragAnchorWorld = GetGlobalMousePosition();
 		_dragStartMouseScreen = GetViewport().GetMousePosition();
 		_passedDeadZone = false;
 		_lastDragInstantVelocity = Vector2.Zero;
+
+		// Break follow mode when user starts dragging
+		_followTarget = null;
 	}
 
-	private void HandleDragEnd(){
+	private void HandleDragEnd()
+	{
 		_isDragging = false;
 		_useFixedZoomAnchorDuringDrag = false; // clear fixed anchor on drag end
 
@@ -129,7 +142,8 @@ public partial class CameraController2D : Camera2D
 		}
 	}
 
-	private void HandleHardDragEnd(){
+	private void HandleHardDragEnd()
+	{
 		_isDragging = false;
 		_useFixedZoomAnchorDuringDrag = false;
 		_inertiaActive = false;
@@ -149,7 +163,9 @@ public partial class CameraController2D : Camera2D
 			StepDrag(dt, frameGlobalMousePosition, frameScreenMousePosition);
 		if (_isZooming) // 2) Smooth cursor-anchored zoom (use fixed anchor while dragging)
 			StepZoom(dt, frameGlobalMousePosition);
-		if (_shouldApplyInertia)  // 3) Inertia: only when not dragging and not zooming (zoom overrides inertia)
+		if (_followTarget != null && !_isDragging) // 3) Follow target: smooth camera following (disabled during drag, overrides inertia)
+			StepFollowTarget(dt);
+		else if (_shouldApplyInertia)  // 4) Inertia: only when not dragging, not zooming, and not following (zoom overrides inertia)
 			StepInertia(dt);
 	}
 
@@ -218,8 +234,38 @@ public partial class CameraController2D : Camera2D
 		// Clamp and stop under threshold
 		_inertiaVelocity = _inertiaVelocity.ClampMaxLength(InertiaMaxSpeed);
 		if (!(_inertiaVelocity.Length() < InertiaMinSpeed)) return;
-		
+
 		_inertiaVelocity = Vector2.Zero;
 		_inertiaActive = false;
+	}
+
+	private void StepFollowTarget(float dt)
+	{
+		if (_followTarget == null || !_followTarget.TryGetComponent<TransformComponent2D>(out var transform))
+		{
+			_followTarget = null;
+			return;
+		}
+
+		// Smoothly lerp camera position toward target
+		var targetPos = transform.Position;
+		var smoothFactor = 1.0f - Mathf.Exp(-FollowSmoothSpeed * dt);
+		GlobalPosition = GlobalPosition.Lerp(targetPos, smoothFactor);
+	}
+
+	/// <summary>
+	/// Set the entity for the camera to follow. Pass null to stop following.
+	/// </summary>
+	public void SetFollowTarget(Entity target)
+	{
+		_followTarget = target;
+		GD.Print($"[CameraController2D] Follow target set to: {(target != null ? target.Name : "null")}");
+
+		// Disable inertia when starting to follow
+		if (target != null)
+		{
+			_inertiaActive = false;
+			_inertiaVelocity = Vector2.Zero;
+		}
 	}
 }

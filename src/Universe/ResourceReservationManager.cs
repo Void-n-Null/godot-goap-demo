@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using Game.Data;
 using Godot;
 using System.Runtime.CompilerServices;
+using Game.Utils;
 
 namespace Game.Universe;
 
@@ -65,7 +66,7 @@ public class ResourceReservationManager
             _agentReservations[agentId].Add(resourceId);
         }
 
-        GD.Print($"[Reservation] {agent.Name} reserved {resource.Name} ({resourceId})");
+        LM.Debug($"[Reservation] {agent.Name} reserved {resource.Name} ({resourceId})");
         return true;
     }
 
@@ -93,7 +94,7 @@ public class ResourceReservationManager
                 _agentReservations[agentId]?.Remove(resourceId);
             }
 
-            GD.Print($"[Reservation] {agent.Name} released {resource.Name} ({resourceId})");
+            LM.Debug($"[Reservation] {agent.Name} released {resource.Name} ({resourceId})");
         }
     }
 
@@ -146,7 +147,7 @@ public class ResourceReservationManager
                     }
                 }
                 reservedResources.Clear();
-                GD.Print($"[Reservation] {agent.Name} released all reservations");
+                LM.Info($"[Reservation] {agent.Name} released all reservations");
             }
         }
     }

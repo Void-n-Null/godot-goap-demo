@@ -8,45 +8,59 @@ namespace Game.Universe.Scenarios;
 
 public sealed class MateTestScenario : Scenario
 {
-	public override string Name => "MateTest";
-	public override string Description => "Pairs of adult NPCs near each other to test the mating utility.";
+    public override string Name => "MateTest";
+    public override string Description => "Pairs of adult NPCs near each other to test the mating utility.";
+    public override string Entities => "4 NPCs, 1 Campfire";
 
-	public override void Setup()
-	{
-		GD.Print("[Scenario:MateTest] Setting up mating test scenario...");
+    public override void Setup()
+    {
+        GD.Print("[Scenario:MateTest] Setting up mating test scenario...");
 
-		SpawnEntity.Now(Campfire.SimpleCampfire, new Vector2(0, -25));
+        SpawnEntity.Now(Campfire.SimpleCampfire, new Vector2(0, -25));
 
-		var positions = new[]
-		{
-			new Vector2(-300, 0),
-			new Vector2(-150, 0),
-			new Vector2(150, 0),
-			new Vector2(300, 0)
-		};
+        var positions = new[]
+        {
+            new Vector2(-300, 0),
+            new Vector2(-150, 0),
+            new Vector2(150, 0),
+            new Vector2(300, 0)
+        };
 
-		for (int i = 0; i < positions.Length; i++)
-		{
-			var npc = SpawnEntity.Now(NPC.Intelligent, positions[i]);
-			if (npc.TryGetComponent<NPCData>(out var data))
-			{
-				data.ClearMateCooldown();
-				data.MatingDesire = 95f;
-				data.Gender = (i % 2 == 0) ? NPCGender.Male : NPCGender.Female;
-				data.AgeGroup = NPCAgeGroup.Adult;
-				data.Temperature = 80f;
-				data.Hunger = 0f;
-				data.Thirst = 0f;
+        for (int i = 0; i < positions.Length; i++)
+        {
+            var npc = SpawnEntity.Now(NPC.Intelligent, positions[i]);
+            if (npc.TryGetComponent<NPCData>(out var data))
+            {
+                data.ClearMateCooldown();
 
-				if (npc.TryGetComponent<VisualComponent>(out var visual))
-				{
-					var path = NPC.DetermineSpritePath(data);
-					visual.SetSprite(path);
-				}
-			}
-		}
+                // Pair 1 (Left): High desire -> Should mate
+                // Pair 2 (Right): Low desire for female -> Should reject
+                if (i < 2)
+                {
+                    data.MatingDesire = 95f;
+                }
+                else
+                {
+                    // Right pair: Male (index 2) wants to, Female (index 3) doesn't
+                    if (i == 2) data.MatingDesire = 95f;
+                    else data.MatingDesire = 10f;
+                }
 
-		GD.Print("[Scenario:MateTest] Ready");
-	}
+                data.Gender = (i % 2 == 0) ? NPCGender.Male : NPCGender.Female;
+                data.AgeGroup = NPCAgeGroup.Adult;
+                data.Temperature = 80f;
+                data.Hunger = 0f;
+                data.Thirst = 0f;
+
+                if (npc.TryGetComponent<VisualComponent>(out var visual))
+                {
+                    var path = NPC.DetermineSpritePath(data);
+                    visual.SetSprite(path);
+                }
+            }
+        }
+
+        GD.Print("[Scenario:MateTest] Ready");
+    }
 }
 

@@ -2,6 +2,7 @@ using System.Linq;
 using Game.Data.Components;
 using Game.Universe;
 using Godot;
+using Game.Utils;
 
 namespace Game.Data.GOAP;
 
@@ -38,7 +39,7 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
             return;
         }
 
-        GD.Print($"ConsumeFoodAction: Starting to eat {_foodTarget.Name} (restores {foodData.HungerRestoredOnConsumption} hunger)");
+        LM.Info($"ConsumeFoodAction: Starting to eat {_foodTarget.Name} (restores {foodData.HungerRestoredOnConsumption} hunger)");
     }
 
     public ActionStatus Update(Entity agent, float dt)
@@ -58,7 +59,7 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
             float hungerRestored = foodData.HungerRestoredOnConsumption;
             npcData.Hunger = Mathf.Max(0, npcData.Hunger - hungerRestored);
 
-            GD.Print($"Consumed {_foodTarget.Name}! Hunger reduced by {hungerRestored}. Current hunger: {npcData.Hunger}/{npcData.MaxHunger}");
+            LM.Info($"Consumed {_foodTarget.Name}! Hunger reduced by {hungerRestored}. Current hunger: {npcData.Hunger}/{npcData.MaxHunger}");
 
             // Release reservation before destroying
             ResourceReservationManager.Instance.Release(_foodTarget, agent);
@@ -77,7 +78,7 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
     {
         if (reason != ActionExitReason.Completed)
         {
-            GD.Print("ConsumeFoodAction canceled before eating finished");
+            LM.Info("ConsumeFoodAction canceled before eating finished");
         }
     }
 
@@ -90,7 +91,7 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
 
     public void Fail(string reason)
     {
-        GD.PushError($"ConsumeFoodAction fail: {reason}");
+        LM.Error($"ConsumeFoodAction fail: {reason}");
         _failed = true;
     }
 }

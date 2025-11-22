@@ -9,12 +9,14 @@ public class Step
 {
     private readonly Func<IAction> _actionFactory;
     private readonly Func<State, double> _costFactory;
-    
+
+    public string Name { get; }
     public State Preconditions { get; }
     public List<(string Key, object Value)> Effects { get; }
 
-    public Step(Func<IAction> actionFactory, State preconditions, List<(string, object)> effects, Func<State, double> costFactory = null)
+    public Step(string name, Func<IAction> actionFactory, State preconditions, List<(string, object)> effects, Func<State, double> costFactory = null)
     {
+        Name = name;
         _actionFactory = actionFactory ?? throw new ArgumentNullException(nameof(actionFactory));
         _costFactory = costFactory ?? (ctx => 1.0);
         Preconditions = preconditions ?? State.Empty();

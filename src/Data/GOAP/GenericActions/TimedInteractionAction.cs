@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using Game.Data.Components;
 using Game.Universe;
+using Game.Utils;
 using Godot;
 
 namespace Game.Data.GOAP.GenericActions;
@@ -57,7 +58,7 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
             return;
         }
 
-        GD.Print($"[{agent.Name}] {_actionName}: Starting interaction with {_targetEntity.Name} (duration: {_interactionTime}s)");
+        LM.Info($"[{agent.Name}] {_actionName}: Starting interaction with {_targetEntity.Name} (duration: {_interactionTime}s)");
     }
 
     private Entity FindNearestTarget(Entity agent)
@@ -79,7 +80,7 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
 
         // Get nearest with small random offset to reduce contention
         // (prevents all agents from targeting the exact same stick)
-        var random = new Random();
+        var random = new System.Random();
         return candidates
             .OrderBy(e => agent.Transform.Position.DistanceTo(e.Transform.Position) + (float)random.NextDouble() * 10f)
             .FirstOrDefault();
@@ -113,7 +114,7 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
             }
 
             _completed = true;
-            GD.Print($"{_actionName} completed after {_timer:F2}s");
+            LM.Info($"{_actionName} completed after {_timer:F2}s");
             return ActionStatus.Succeeded;
         }
 
@@ -124,7 +125,7 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
     {
         if (reason != ActionExitReason.Completed)
         {
-            GD.Print($"{_actionName} canceled or failed before completion");
+            LM.Warning($"{_actionName} canceled or failed before completion");
             
             // ✅ FIXED: Only release if WE created the reservation (ownership model)
             // If we just verified someone else's reservation (RequireReservation=true),
@@ -132,7 +133,7 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
             if (_targetEntity != null && _finderConfig.ShouldReserve)
             {
                 ResourceReservationManager.Instance.Release(_targetEntity, agent);
-                GD.Print($"[Reservation Cleanup] Released {_targetEntity.Name} due to {reason}");
+                LM.Debug($"[Reservation Cleanup] Released {_targetEntity.Name} due to {reason}");
             }
         }
     }
@@ -148,7 +149,7 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
 
     public void Fail(string reason)
     {
-        GD.PushError($"{_actionName} fail: {reason}");
+        LM.Error($"{_actionName} fail: {reason}");
         _failed = true;
     }
 }

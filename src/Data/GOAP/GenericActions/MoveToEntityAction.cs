@@ -3,6 +3,7 @@ using System.Linq;
 using Game.Data.Components;
 using Game.Universe;
 using Godot;
+using Game.Utils;
 
 namespace Game.Data.GOAP.GenericActions;
 
@@ -47,7 +48,7 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
             return;
         }
 
-        GD.Print($"[{agent.Name}] {_actionName}: Moving to {_targetEntity.Name} at {_targetEntity.Transform.Position}");
+        LM.Info($"[{agent.Name}] {_actionName}: Moving to {_targetEntity.Name} at {_targetEntity.Transform.Position}");
 
         _motor.OnTargetReached += OnArrived;
         _motor.Target = _targetEntity.Transform.Position;
@@ -58,7 +59,7 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
         // Expanding search: start with configured radius, expand up to 3 times if needed
         float searchRadius = _finderConfig.SearchRadius;
         const int MAX_ATTEMPTS = 3;
-        var random = new Random();
+        var random = new System.Random();
 
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++)
         {
@@ -172,7 +173,7 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
 
     public override void Fail(string reason)
     {
-        GD.PushError($"{_actionName} fail: {reason}");
+        LM.Error($"{_actionName} fail: {reason}");
         _failed = true;
     }
 }

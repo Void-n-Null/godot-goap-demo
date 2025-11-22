@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Game.Data.Components;
 using Godot;
+using Game.Utils;
 
 namespace Game.Data.GOAP.GenericActions;
 
@@ -80,7 +81,7 @@ public class InteractionEffectConfig
                 if (agent.TryGetComponent<NPCData>(out var npcData))
                 {
                     npcData.Resources[resourceType] = (npcData.Resources.TryGetValue(resourceType, out var count) ? count : 0) + 1;
-                    GD.Print($"Picked up 1 {resourceType}; total: {npcData.Resources[resourceType]}");
+                    LM.Info($"Picked up 1 {resourceType}; total: {npcData.Resources[resourceType]}");
                 }
             },
             DestroyTargetOnComplete = true,
@@ -100,7 +101,7 @@ public class InteractionEffectConfig
                 if (target.TryGetComponent<HealthComponent>(out var health))
                 {
                     health.Kill();
-                    GD.Print($"Killed {target.Name}");
+                    LM.Info($"Killed {target.Name}");
                 }
             },
             DestroyTargetOnComplete = false, // HealthComponent handles destruction
@@ -122,7 +123,7 @@ public class InteractionEffectConfig
                 {
                     float hungerRestored = foodData.HungerRestoredOnConsumption;
                     npcData.Hunger = Mathf.Max(0, npcData.Hunger - hungerRestored);
-                    GD.Print($"Consumed {target.Name}! Hunger: {npcData.Hunger}/{npcData.MaxHunger}");
+                    LM.Info($"Consumed {target.Name}! Hunger: {npcData.Hunger}/{npcData.MaxHunger}");
                 }
             },
             DestroyTargetOnComplete = true,

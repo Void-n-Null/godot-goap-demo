@@ -4,6 +4,7 @@ using Game.Data.Components;
 using Game.Universe;
 using System.Collections.Generic;
 using Random = Game.Utils.Random;
+using Game.Utils;
 
 namespace Game.Data.Components;
 
@@ -42,7 +43,7 @@ public class LootDropComponent : IComponent
         }
         else
         {
-            GD.PushWarning($"LootDropComponent on {Entity.Name} but no HealthComponent found - loot will never drop!");
+            LM.Warning($"LootDropComponent on {Entity.Name} but no HealthComponent found - loot will never drop!");
         }
     }
 
@@ -51,7 +52,7 @@ public class LootDropComponent : IComponent
         if (Drops.Count == 0) return;
         
         var spawnPos = Entity.Transform.Position;
-        GD.Print($"LootDropComponent: {Entity.Name} died at {spawnPos}. Dropping loot:");
+        LM.Debug($"LootDropComponent: {Entity.Name} died at {spawnPos}. Dropping loot:");
         
         foreach (var drop in Drops)
         {
@@ -63,7 +64,7 @@ public class LootDropComponent : IComponent
                 
                 if (i == 0) // Log once per drop type
                 {
-                    GD.Print($"  - Dropping {drop.Quantity}x {drop.Blueprint.Name} (scatter radius: {ScatterRadius})");
+                    LM.Debug($"  - Dropping {drop.Quantity}x {drop.Blueprint.Name} (scatter radius: {ScatterRadius})");
                 }
             }
         }

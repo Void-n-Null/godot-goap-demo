@@ -98,7 +98,7 @@ public class HealthComponent : IComponent
 
     public void OnDeath()
     {
-        GD.Print($"HealthComponent.OnDeath for {Entity.Name} at {Entity.Transform.Position}");
+        LM.Debug($"HealthComponent.OnDeath for {Entity.Name} at {Entity.Transform.Position}");
         
         // Trigger death event BEFORE cleanup so components can spawn loot, trigger effects, etc.
         OnDeathAction?.Invoke();

@@ -8,160 +8,213 @@ namespace Game.Data.GOAP.GenericActions;
 
 public sealed class MoveToMateAction(float searchRadius = 2000f, float reachDistance = 64f) : PeriodicGuardAction(0.4f)
 {
-	private readonly float _searchRadius = searchRadius;
-	private readonly float _reachDistance = reachDistance;
+    private readonly float _searchRadius = searchRadius;
+    private readonly float _reachDistance = reachDistance;
 
-	private Entity _mateTarget;
-	private NPCMotorComponent _motor;
-	private bool _arrived;
-	private bool _failed;
+    private Entity _mateTarget;
+    private NPCMotorComponent _motor;
+    private bool _arrived;
+    private bool _failed;
 
-	public override string Name => "GoToMate";
+    public override string Name => "GoToMate";
 
-	public override void Enter(Entity agent)
-	{
-		if (!agent.TryGetComponent(out _motor))
-		{
-			Fail("Agent lacks NPCMotorComponent");
-			return;
-		}
+    public override void Enter(Entity agent)
+    {
+        if (!agent.TryGetComponent(out _motor))
+        {
+            Fail("Agent lacks NPCMotorComponent");
+            return;
+        }
 
-		var npcData = agent.GetComponent<NPCData>();
-		if (npcData == null || !npcData.ShouldSeekMate)
-		{
-			Fail("Agent not ready to mate");
-			return;
-		}
+        var npcData = agent.GetComponent<NPCData>();
+        if (npcData == null || !npcData.ShouldSeekMate)
+        {
+            Fail("Agent not ready to mate");
+            return;
+        }
 
-		_mateTarget = FindMateCandidate(agent, npcData);
-		if (_mateTarget == null)
-		{
-			Fail("No compatible mate found");
-			return;
-		}
+        _mateTarget = FindMateCandidate(agent, npcData);
+        if (_mateTarget == null)
+        {
+            // No one found, cooldown for a bit so we don't spam
+            npcData.ApplyMateSearchCooldown(5.0f);
+            Fail("No compatible mate found");
+            return;
+        }
 
-		if (!ResourceReservationManager.Instance.TryReserve(_mateTarget, agent))
-		{
-			Fail("Failed to reserve mate candidate");
-			return;
-		}
+        if (!ResourceReservationManager.Instance.TryReserve(_mateTarget, agent))
+        {
+            Fail("Failed to reserve mate candidate");
+            return;
+        }
 
         npcData.SetActiveMate(_mateTarget);
-        if (_mateTarget.TryGetComponent<NPCData>(out var partnerData) && !partnerData.HasActiveMate)
+
+        // Send request to partner
+        if (_mateTarget.TryGetComponent<NPCData>(out var partnerData))
         {
-            partnerData.SetActiveMate(agent);
+            partnerData.ReceiveMateRequest(agent);
         }
-		_motor.OnTargetReached += OnArrived;
-		_motor.Target = _mateTarget.Transform.Position;
-	}
 
-	private Entity FindMateCandidate(Entity agent, NPCData agentData)
-	{
-		var candidates = ServiceLocator.EntityManager
-			.QueryByComponent<NPCData>(agent.Transform.Position, _searchRadius)
-			.Where(e => e != agent)
-			.OrderBy(e => agent.Transform.Position.DistanceSquaredTo(e.Transform.Position));
+        _motor.OnTargetReached += OnArrived;
+        _motor.Target = _mateTarget.Transform.Position;
+    }
 
-		foreach (var entity in candidates)
-		{
-			var data = entity.GetComponent<NPCData>();
-			if (data == null || !IsCompatible(agentData, data, agent))
-				continue;
+    private Entity FindMateCandidate(Entity agent, NPCData agentData)
+    {
+        var candidates = ServiceLocator.EntityManager
+            .QueryByComponent<NPCData>(agent.Transform.Position, _searchRadius)
+            .Where(e => e != agent)
+            .OrderBy(e => agent.Transform.Position.DistanceSquaredTo(e.Transform.Position));
 
-			if (!ResourceReservationManager.Instance.IsAvailableFor(entity, agent))
-				continue;
+        foreach (var entity in candidates)
+        {
+            var data = entity.GetComponent<NPCData>();
+            if (data == null || !IsCompatible(agentData, data, agent))
+                continue;
 
-			return entity;
-		}
+            if (!ResourceReservationManager.Instance.IsAvailableFor(entity, agent))
+                continue;
 
-		return null;
-	}
+            return entity;
+        }
 
-	private static bool IsCompatible(NPCData seeker, NPCData candidate, Entity seekerEntity)
-	{
-		if (!candidate.IsAvailableForMate(seekerEntity))
-			return false;
+        return null;
+    }
 
-		if (candidate.Gender == seeker.Gender)
-			return false;
+    private static bool IsCompatible(NPCData seeker, NPCData candidate, Entity seekerEntity)
+    {
+        if (!candidate.IsAvailableForMate(seekerEntity))
+            return false;
 
-		return true;
-	}
+        if (candidate.Gender == seeker.Gender)
+            return false;
 
-	private void OnArrived() => _arrived = true;
+        return true;
+    }
 
-	public override ActionStatus Update(Entity agent, float dt)
-	{
-		if (_failed || _mateTarget == null || _motor == null)
-			return ActionStatus.Failed;
+    private void OnArrived() => _arrived = true;
 
-		_motor.Target = _mateTarget.Transform.Position;
+    public override ActionStatus Update(Entity agent, float dt)
+    {
+        if (_failed || _mateTarget == null || _motor == null)
+            return ActionStatus.Failed;
 
-		if (_arrived)
-			return ActionStatus.Succeeded;
+        _motor.Target = _mateTarget.Transform.Position;
 
-		float dist = agent.Transform.Position.DistanceTo(_mateTarget.Transform.Position);
-		if (dist <= _reachDistance)
-		{
-			_arrived = true;
-			return ActionStatus.Succeeded;
-		}
+        if (_arrived)
+        {
+            // Even if arrived, we must wait for acceptance!
+            if (_mateTarget.TryGetComponent<NPCData>(out var pData))
+            {
+                // Check for rejection first
+                if (pData.IncomingMateRequestStatus == NPCData.MateRequestStatus.Rejected)
+                {
+                    // Rejected! Cooldown for longer
+                    if (agent.TryGetComponent<NPCData>(out var myData))
+                    {
+                        myData.ApplyMateSearchCooldown(10.0f);
+                    }
+                    Fail("Mate request rejected");
+                    return ActionStatus.Failed;
+                }
 
-		return ActionStatus.Running;
-	}
+                if (pData.IncomingMateRequestStatus == NPCData.MateRequestStatus.Accepted)
+                {
+                    return ActionStatus.Succeeded;
+                }
+                // Still pending... wait
+                return ActionStatus.Running;
+            }
+            return ActionStatus.Succeeded; // Fallback
+        }
 
-	public override void Exit(Entity agent, ActionExitReason reason)
-	{
-		if (_motor != null)
-		{
-			_motor.OnTargetReached -= OnArrived;
-			if (reason != ActionExitReason.Completed)
-			{
-				_motor.Target = null;
-			}
-		}
+        // Check if partner rejected us
+        if (_mateTarget.TryGetComponent<NPCData>(out var partnerData))
+        {
+            if (partnerData.IncomingMateRequestStatus == NPCData.MateRequestStatus.Rejected)
+            {
+                // Rejected! Cooldown for longer
+                if (agent.TryGetComponent<NPCData>(out var myData))
+                {
+                    myData.ApplyMateSearchCooldown(10.0f);
+                }
+                Fail("Mate request rejected");
+                return ActionStatus.Failed;
+            }
+        }
 
-		if (_mateTarget != null && reason != ActionExitReason.Completed)
-		{
-			ResourceReservationManager.Instance.Release(_mateTarget, agent);
-		}
+        float dist = agent.Transform.Position.DistanceTo(_mateTarget.Transform.Position);
+        if (dist <= _reachDistance)
+        {
+            _arrived = true;
+            // Don't return Succeeded yet, next frame will check acceptance
+            return ActionStatus.Running;
+        }
 
-		if (agent.TryGetComponent<NPCData>(out var data))
-		{
-			if (reason != ActionExitReason.Completed)
-			{
-				data.ClearActiveMate();
-			}
-		}
-	}
+        return ActionStatus.Running;
+    }
+    public override void Exit(Entity agent, ActionExitReason reason)
+    {
+        if (_motor != null)
+        {
+            _motor.OnTargetReached -= OnArrived;
+            if (reason != ActionExitReason.Completed)
+            {
+                _motor.Target = null;
+            }
+        }
 
-	public override bool StillValid(Entity agent)
-	{
-		if (_failed || _mateTarget == null)
-			return false;
+        if (_mateTarget != null && reason != ActionExitReason.Completed)
+        {
+            ResourceReservationManager.Instance.Release(_mateTarget, agent);
+        }
 
-		if (!agent.TryGetComponent<NPCData>(out var data))
-			return false;
+        if (agent.TryGetComponent<NPCData>(out var data))
+        {
+            if (reason != ActionExitReason.Completed)
+            {
+                data.ClearActiveMate();
+            }
+        }
 
-		return EvaluateGuardPeriodically(agent, () =>
-		{
-			if (_mateTarget == null || !_mateTarget.IsActive)
-				return false;
+        // If we failed or cancelled, clear the request on the partner
+        if (reason != ActionExitReason.Completed && _mateTarget != null && _mateTarget.TryGetComponent<NPCData>(out var pData))
+        {
+            if (pData.IncomingMateRequestFrom == agent.Id)
+            {
+                pData.ClearMateRequest();
+            }
+        }
+    }
 
-			if (!IsCompatible(data, _mateTarget.GetComponent<NPCData>(), agent))
-				return false;
+    public override bool StillValid(Entity agent)
+    {
+        if (_failed || _mateTarget == null)
+            return false;
 
-			if (!ResourceReservationManager.Instance.IsReservedBy(_mateTarget, agent))
-				return false;
+        if (!agent.TryGetComponent<NPCData>(out var data))
+            return false;
 
-			return true;
-		});
-	}
+        return EvaluateGuardPeriodically(agent, () =>
+        {
+            if (_mateTarget == null || !_mateTarget.IsActive)
+                return false;
 
-	public override void Fail(string reason)
-	{
-		GD.PushError($"GoToMate fail: {reason}");
-		_failed = true;
-	}
+            if (!IsCompatible(data, _mateTarget.GetComponent<NPCData>(), agent))
+                return false;
+
+            if (!ResourceReservationManager.Instance.IsReservedBy(_mateTarget, agent))
+                return false;
+
+            return true;
+        });
+    }
+
+    public override void Fail(string reason)
+    {
+        GD.PushError($"GoToMate fail: {reason}");
+        _failed = true;
+    }
 }
 

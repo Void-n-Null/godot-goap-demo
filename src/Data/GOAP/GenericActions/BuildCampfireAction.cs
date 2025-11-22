@@ -50,7 +50,7 @@ public sealed class BuildCampfireAction(int sticksRequired = 16, float buildTime
             return;
         }
 
-        GD.Print($"[{agent.Name}] BuildCampfire: Starting construction (duration: {_buildTime}s, cost: {_sticksRequired} sticks)");
+        LM.Info($"[{agent.Name}] BuildCampfire: Starting construction (duration: {_buildTime}s, cost: {_sticksRequired} sticks)");
     }
 
     public override ActionStatus Update(Entity agent, float dt)
@@ -87,7 +87,7 @@ public sealed class BuildCampfireAction(int sticksRequired = 16, float buildTime
             );
 
             _completed = true;
-            GD.Print($"Built campfire at {transform.Position}! Sticks remaining: {npcData.Resources[TargetType.Stick]}");
+            LM.Info($"Built campfire at {transform.Position}! Sticks remaining: {npcData.Resources[TargetType.Stick]}");
             return ActionStatus.Succeeded;
         }
 
@@ -98,7 +98,7 @@ public sealed class BuildCampfireAction(int sticksRequired = 16, float buildTime
     {
         if (reason != ActionExitReason.Completed)
         {
-            GD.Print("BuildCampfire canceled before completion");
+            LM.Info("BuildCampfire canceled before completion");
         }
     }
 
@@ -110,7 +110,7 @@ public sealed class BuildCampfireAction(int sticksRequired = 16, float buildTime
         {
             if (HasCampfireNearby(agent))
             {
-                GD.Print($"[{agent.Name}] BuildCampfire aborted - campfire already nearby.");
+                LM.Info($"[{agent.Name}] BuildCampfire aborted - campfire already nearby.");
                 return false;
             }
             return true;
@@ -131,7 +131,7 @@ public sealed class BuildCampfireAction(int sticksRequired = 16, float buildTime
 
     public override void Fail(string reason)
     {
-        GD.PushError($"BuildCampfire fail: {reason}");
+        LM.Error($"BuildCampfire fail: {reason}");
         _failed = true;
     }
 

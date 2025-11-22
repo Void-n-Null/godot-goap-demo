@@ -11,13 +11,13 @@ public class StepConfig
 {
     public string Name { get; set; }
     public Func<IAction> ActionFactory { get; set; }
-    
+
     // Changed to State
     public State Preconditions { get; set; } = State.Empty();
-    
+
     // Changed to List
     public List<(string Key, object Value)> Effects { get; set; } = new();
-    
+
     public Func<State, double> CostFactory { get; set; } = _ => 1.0;
 
     public StepConfig(string name)
@@ -136,11 +136,28 @@ public class GenericStepFactory : IStepFactory
             CostFactory = _ => 1.0
         };
         _stepConfigs.Add(mate);
+
+        RegisterRespondToMateStep();
+    }
+
+    private void RegisterRespondToMateStep()
+    {
+        var config = new StepConfig("RespondToMate")
+        {
+            ActionFactory = () => new RespondToMateAction(),
+            Preconditions = State.Empty(), // Action checks validity
+            Effects = new List<(string, object)>
+            {
+                (FactKeys.MateRequestHandled, (FactValue)true)
+            },
+            CostFactory = _ => 1.0
+        };
+        _stepConfigs.Add(config);
     }
 
     private void RegisterPickUpTargetStep(TargetType type)
     {
-        if (type == TargetType.Tree || type == TargetType.Bed || type == TargetType.Campfire) 
+        if (type == TargetType.Tree || type == TargetType.Bed || type == TargetType.Campfire)
             return;
 
         var pre = State.Empty();
@@ -203,25 +220,25 @@ public class GenericStepFactory : IStepFactory
         {
             (FactKeys.TargetChopped(targetType), (FactValue)true),
             (FactKeys.WorldHas(producedType), (FactValue)true),
-            
+
             (FactKeys.WorldCount(producedType), (Func<State, FactValue>)(ctx => {
                 if (ctx.TryGet(FactKeys.WorldCount(producedType), out var wObj))
                     return wObj.IntValue + 4;
                 return 4;
             })),
-            
+
             (FactKeys.WorldCount(targetType), (Func<State, FactValue>)(ctx => {
                 if (ctx.TryGet(FactKeys.WorldCount(targetType), out var tObj))
                     return Math.Max(0, tObj.IntValue - 1);
                 return 0;
             })),
-            
+
             (FactKeys.WorldHas(targetType), (Func<State, FactValue>)(ctx => {
                 if (ctx.TryGet(FactKeys.WorldCount(targetType), out var tObj))
                     return tObj.IntValue - 1 > 0;
                 return false;
             })),
-            
+
             (FactKeys.NearTarget(targetType), (FactValue)false),
             (FactKeys.NearTarget(producedType), (FactValue)true)
         };
@@ -258,7 +275,7 @@ public class GenericStepFactory : IStepFactory
         var effects = new List<(string, object)>
         {
             ("IsHungry", (FactValue)false),
-            
+
             (FactKeys.WorldCount(TargetType.Food), (Func<State, FactValue>)(ctx => {
                 if (ctx.TryGet(FactKeys.WorldCount(TargetType.Food), out var wObj))
                     return Math.Max(0, wObj.IntValue - 1);
@@ -300,8 +317,8 @@ public class GenericStepFactory : IStepFactory
     {
         var pre = State.Empty();
         pre.Set(FactKeys.AgentHas(TargetType.Stick), true);
-        pre.Set(FactKeys.AgentCount(TargetType.Stick), 2); 
-        
+        pre.Set(FactKeys.AgentCount(TargetType.Stick), 2);
+
         var effects = new List<(string, object)>
         {
             ("HasCampfire", (FactValue)true),
@@ -336,7 +353,14 @@ public class GenericStepFactory : IStepFactory
         var steps = new List<Step>();
         foreach (var config in _stepConfigs)
         {
-            steps.Add(new Step(config.ActionFactory, config.Preconditions, config.Effects, config.CostFactory));
+            var step = new Step(
+                config.Name,
+                config.ActionFactory,
+                config.Preconditions,
+                config.Effects,
+                config.CostFactory
+            );
+            steps.Add(step);
         }
         return steps;
     }

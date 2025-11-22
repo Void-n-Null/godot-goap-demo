@@ -6,11 +6,13 @@ using Godot;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using Game.Utils;
 
 namespace Game.Data.GOAP;
 
 
-public class PlanningConfig {
+public class PlanningConfig
+{
     public required int MaxDepth { get; set; }
     public required int MaxOpenSetSize { get; set; }
 }
@@ -155,8 +157,8 @@ public static class AdvancedGoalPlanner
             }
             catch (Exception e)
             {
-                GD.PushError($"Error in step factory {factory.GetType().Name}: {e.Message}");
-                GD.PushError($"Stack trace: {e.StackTrace}");
+                LM.Error($"Error in step factory {factory.GetType().Name}: {e.Message}");
+                LM.Error($"Stack trace: {e.StackTrace}");
             }
         }
 
@@ -223,7 +225,7 @@ public static class AdvancedGoalPlanner
         // Debug output to show pruning effectiveness
         if (allSteps.Count > pruned.Count)
         {
-            GD.Print($"[Pruning] Reduced steps from {allSteps.Count} to {pruned.Count} ({100.0 * pruned.Count / allSteps.Count:F1}% retained)");
+            // GD.Print($"[Pruning] Reduced steps from {allSteps.Count} to {pruned.Count} ({100.0 * pruned.Count / allSteps.Count:F1}% retained)");
         }
 
         return pruned;
@@ -239,7 +241,7 @@ public static class AdvancedGoalPlanner
             assembly = Assembly.GetExecutingAssembly();
 
         // Discover factories reflectively only once
-        return _cachedFactories ??= 
+        return _cachedFactories ??=
         [
             .. assembly.GetTypes()
             .Where(t => typeof(IStepFactory).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface)
@@ -250,11 +252,12 @@ public static class AdvancedGoalPlanner
     //I know this implies a backward planning option... But for now, we'll stick to forward planning.
     //I want to eventually implement a backward planning option though... I don't think our state and step 
     //data is set up for backward planning...
-    public static Plan ForwardPlan(State initialState, State goalState, PlanningConfig config = null){
+    public static Plan ForwardPlan(State initialState, State goalState, PlanningConfig config = null)
+    {
         config ??= DefaultConfig;
         //Alright, when we start, these are all the steps we can take.
         var steps = GenerateStepsForState(initialState, goalState);
-        
+
         //Now then... Let's begin our A* Forward planning!
         var openSet = new PriorityQueue<(State state, PathNode path, double gCost, float fScore), float>();
         //We only needed defensive and silent fails before because we did not have a good heuristic function before.
@@ -265,7 +268,7 @@ public static class AdvancedGoalPlanner
 
         var visited = new HashSet<int>();
 
-        
+
 
         while (openSet.Count > 0)
         {
@@ -281,7 +284,7 @@ public static class AdvancedGoalPlanner
             if (currentState.Satisfies(goalState))
             {
                 var path = pathNode?.ReconstructPath() ?? new List<Step>();
-                GD.Print($"Plan found: {path.Count} steps, total cost {gCost:F1}");
+                LM.Info($"Plan found: {path.Count} steps, total cost {gCost:F1}");
                 return new Plan(path, initialState);
             }
 
@@ -323,13 +326,13 @@ public static class AdvancedGoalPlanner
         var openSetLock = new object();
         // Pre-size visited set to reduce resizing during search (typical search explores 100-1000 states)
         var visited = new ConcurrentDictionary<int, bool>(System.Environment.ProcessorCount, 512);
-        
+
         var initialHeuristic = StateComparison.CalculateStateComparisonHeuristic(initialState, goalState);
         openSet.Enqueue((initialState.Clone(), null, 0.0, initialHeuristic), initialHeuristic);
 
         // Beam width - number of states to expand in parallel
         const int beamWidth = 4;
-        
+
         // Track solution (thread-safe)
         // Use CancellationToken to avoid lock contention on every check
         Plan foundPlan = null;
@@ -353,7 +356,7 @@ public static class AdvancedGoalPlanner
 
             // Expand candidates in parallel
             var parallelOptions = new ParallelOptions { CancellationToken = cts.Token };
-            
+
             try
             {
                 Parallel.ForEach(candidates, parallelOptions, (candidate, loopState) =>
@@ -382,7 +385,7 @@ public static class AdvancedGoalPlanner
                             if (foundPlan == null || path.Count < foundPlan.Steps.Count)
                             {
                                 foundPlan = new Plan(path, initialState);
-                                GD.Print($"Plan found (parallel): {path.Count} steps, total cost {gCost:F1}");
+                                LM.Info($"Plan found (parallel): {path.Count} steps, total cost {gCost:F1}");
                             }
                         }
                         cts.Cancel(); // Signal all threads to stop
@@ -409,7 +412,7 @@ public static class AdvancedGoalPlanner
                     {
                         // Parallel step expansion for many steps
                         var stepResults = new ConcurrentBag<(State state, PathNode path, double gCost, float fScore)>();
-                        
+
                         Parallel.ForEach(validSteps, parallelOptions, step =>
                         {
                             var successor = CreateSuccessorState(currentState, step, pathNode, gCost, goalState);

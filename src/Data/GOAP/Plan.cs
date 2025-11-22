@@ -4,6 +4,7 @@ using Game.Data;
 using Game.Data.GOAP;
 using Godot;
 using System.Linq;
+using Game.Utils;
 
 namespace Game.Data.GOAP;
 
@@ -33,7 +34,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 
 	if (goalSatisfied != null && goalSatisfied(agent))
 	{
-		GD.Print("Plan goal satisfied during tick, ending plan early.");
+		LM.Info("Plan goal satisfied during tick, ending plan early.");
 		IsComplete = true;
 		Succeeded = true;
 		if (_currentAction != null)
@@ -46,7 +47,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 
 		if (_currentAction is IRuntimeGuard guard && !guard.StillValid(agent))
 		{
-			GD.Print($"Plan step {_currentStepIndex} no longer valid, failing plan");
+			LM.Warning($"Plan step {_currentStepIndex} no longer valid, failing plan");
 			_currentAction.Exit(agent, ActionExitReason.Failed);
 			_currentAction = null;
 			IsComplete = true;
@@ -65,7 +66,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 			}
 
 			var step = _steps[_currentStepIndex];
-			GD.Print($"Plan starting step {_currentStepIndex}");
+			LM.Debug($"Plan starting step {_currentStepIndex}");
 
 			_currentAction = step.CreateAction();
 			_currentAction.Enter(agent);
@@ -82,7 +83,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 		if (status == ActionStatus.Succeeded)
 		{
 			var step = _steps[_currentStepIndex];
-			GD.Print($"Step {_currentStepIndex} succeeded, applying {step.Effects.Count} effects");
+			LM.Debug($"Step {_currentStepIndex} succeeded, applying {step.Effects.Count} effects");
 			
 			foreach(var (key, val) in step.Effects)
 			{
@@ -112,7 +113,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 		}
 		else
 		{
-			GD.PushError($"Plan step {_currentStepIndex} failed - check action Fail logs for reason");
+			LM.Error($"Plan step {_currentStepIndex} failed - check action Fail logs for reason");
 			IsComplete = true;
 			Succeeded = false;
 			return true;
@@ -123,7 +124,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 	// Start next step on next tick, but if goal already satisfied, finish now
 	if (goalSatisfied != null && goalSatisfied(agent))
 	{
-		GD.Print("Plan goal satisfied after step completion, ending plan.");
+		LM.Info("Plan goal satisfied after step completion, ending plan.");
 		IsComplete = true;
 		Succeeded = true;
 		return true;

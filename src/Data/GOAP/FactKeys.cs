@@ -12,18 +12,19 @@ public static class FactKeys
     public static string AgentHas(TargetType resource) => $"Has_{resource}";
     public static string AgentCount(TargetType resource) => $"Agent_{resource}_Count";
     public static string NearTarget(TargetType target) => $"Near_{target}";
-    
+
     // World state facts
     public static string WorldHas(TargetType resource) => $"World_Has_{resource}";
     public static string WorldCount(TargetType resource) => $"World_{resource}_Count";
-    
+
     // Action state facts
     public static string TargetChopped(TargetType target) => $"{target}_Chopped";
 
     // Social facts
     public const string MateDesireSatisfied = "MateDesireSatisfied";
     public const string NearMate = "NearMate";
-    
+    public const string MateRequestHandled = "MateRequestHandled";
+
     // Common facts
     public const string AgentId = "AgentId";
     public const string Position = "Position";

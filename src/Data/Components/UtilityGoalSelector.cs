@@ -1,9 +1,11 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Game.Data;
 using Game.Data.Components;
 using Game.Data.UtilityAI;
+using Game.Utils;
 
 namespace Game.Data.Components;
 
@@ -16,182 +18,194 @@ namespace Game.Data.Components;
 /// </summary>
 public class UtilityGoalSelector : IActiveComponent
 {
-	public Entity Entity { get; set; }
+    public Entity Entity { get; set; }
 
-	private IUtilityGoal _currentGoal;
-	
-	// Available goals to choose from
-	private List<IUtilityGoal> _availableGoals = [];
+    private IUtilityGoal _currentGoal;
 
-	// Track goals that failed to plan (couldn't find a path)
-	private Dictionary<IUtilityGoal, float> _goalPlanFailureCooldowns = new();
-	private const float PLAN_FAILURE_COOLDOWN = 5.0f; // Don't retry for 5 seconds if no plan found
+    // Available goals to choose from
+    private List<IUtilityGoal> _availableGoals = [];
 
-	// Track goals that failed during execution
-	private Dictionary<IUtilityGoal, float> _goalExecutionFailureCooldowns = new();
-	private const float EXECUTION_FAILURE_COOLDOWN = 2.0f; // Small cooldown for execution failures
+    // Track goals that failed to plan (couldn't find a path)
+    private Dictionary<IUtilityGoal, float> _goalPlanFailureCooldowns = new();
+    private const float PLAN_FAILURE_COOLDOWN = 5.0f; // Don't retry for 5 seconds if no plan found
 
-	private AIGoalExecutor _executor;
+    // Track goals that failed during execution
+    private Dictionary<IUtilityGoal, float> _goalExecutionFailureCooldowns = new();
+    private const float EXECUTION_FAILURE_COOLDOWN = 2.0f; // Small cooldown for execution failures
 
-	public void Update(double delta)
-	{
-		// Selector is event-driven - only reacts to executor events
-		// No periodic evaluation to avoid interrupting active plans
-	}
+    private AIGoalExecutor _executor;
 
-	private void OnExecutorCannotPlan(IUtilityGoal goal)
-	{
-		string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
-		string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
-		GD.Print($"[{nameFirstWord} {idFirst6}] Executor couldn't find plan for '{goal.Name}', applying {PLAN_FAILURE_COOLDOWN}s cooldown");
-		_goalPlanFailureCooldowns[goal] = Time.GetTicksMsec() / 1000.0f + PLAN_FAILURE_COOLDOWN;
-		_currentGoal = null;
-		EvaluateAndSelectGoal();
-	}
+    public void Update(double delta)
+    {
+        // Selector is event-driven - only reacts to executor events
+        // No periodic evaluation to avoid interrupting active plans
+    }
 
-	private void OnExecutorPlanExecutionFailed(IUtilityGoal goal)
-	{
-		string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
-		string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
-		GD.Print($"[{nameFirstWord} {idFirst6}] Executor's plan execution failed for '{goal.Name}', applying {EXECUTION_FAILURE_COOLDOWN}s cooldown");
+    private void OnExecutorCannotPlan(IUtilityGoal goal)
+    {
+        string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
+        string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
+        LM.Warning($"[{nameFirstWord} {idFirst6}] Executor couldn't find plan for '{goal.Name}', applying {PLAN_FAILURE_COOLDOWN}s cooldown");
+        _goalPlanFailureCooldowns[goal] = Time.GetTicksMsec() / 1000.0f + PLAN_FAILURE_COOLDOWN;
+        _currentGoal = null;
+        EvaluateAndSelectGoal();
+    }
 
-		// If the goal immediately regained high utility (e.g. new campfire spawned while walking),
-		// retry it right away instead of enforcing a cooldown.
-		float utility = goal.CalculateUtility(Entity);
-		if (utility >= 0.5f)
-		{
-			GD.Print($"[{nameFirstWord} {idFirst6}] Goal '{goal.Name}' still urgent (utility {utility:F2}), retrying immediately");
-			_goalExecutionFailureCooldowns.Remove(goal);
-		}
-		else
-		{
-			_goalExecutionFailureCooldowns[goal] = Time.GetTicksMsec() / 1000.0f + EXECUTION_FAILURE_COOLDOWN;
-		}
+    private void OnExecutorPlanExecutionFailed(IUtilityGoal goal)
+    {
+        string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
+        string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
+        LM.Warning($"[{nameFirstWord} {idFirst6}] Executor's plan execution failed for '{goal.Name}', applying {EXECUTION_FAILURE_COOLDOWN}s cooldown");
 
-		_currentGoal = null;
-		EvaluateAndSelectGoal();
-	}
+        // Always apply cooldown on execution failure to prevent jittery loops.
+        // If it's truly urgent, they can try again after a short break.
+        _goalExecutionFailureCooldowns[goal] = Time.GetTicksMsec() / 1000.0f + EXECUTION_FAILURE_COOLDOWN;
 
-	private void OnExecutorPlanSucceeded()
-	{
-		// Plan succeeded, goal should be satisfied soon
-		// We can wait for the periodic evaluation
-	}
+        _currentGoal = null;
+        EvaluateAndSelectGoal();
+    }
 
-	private void OnExecutorGoalSatisfied()
-	{
+    private void OnExecutorPlanSucceeded()
+    {
+        // Plan succeeded, check if we should switch goals or continue
+        EvaluateAndSelectGoal();
+    }
 
-		// Clear cooldowns for the satisfied goal since it worked
-		if (_currentGoal != null)
-		{
-			_goalPlanFailureCooldowns.Remove(_currentGoal);
-			_goalExecutionFailureCooldowns.Remove(_currentGoal);
-		}
-		_currentGoal = null;
-		EvaluateAndSelectGoal();
-	}
+    private void OnExecutorGoalSatisfied()
+    {
 
-	private void OnExecutorNeedNewGoal()
-	{
-		// Executor needs a goal, assign one immediately
-		EvaluateAndSelectGoal();
-	}
+        // Clear cooldowns for the satisfied goal since it worked
+        if (_currentGoal != null)
+        {
+            _goalPlanFailureCooldowns.Remove(_currentGoal);
+            _goalExecutionFailureCooldowns.Remove(_currentGoal);
+        }
+        _currentGoal = null;
+        EvaluateAndSelectGoal();
+    }
 
-	private bool IsGoalOnCooldown(IUtilityGoal goal)
-	{
-		float currentTime = Time.GetTicksMsec() / 1000.0f;
+    private void OnExecutorNeedNewGoal()
+    {
+        // Executor needs a goal, assign one immediately
+        EvaluateAndSelectGoal();
+    }
 
-		// Check plan failure cooldown
-		if (_goalPlanFailureCooldowns.TryGetValue(goal, out float planCooldownEnd))
-		{
-			if (currentTime < planCooldownEnd)
-			{
-				return true;
-			}
-			// Cooldown expired, remove it
-			_goalPlanFailureCooldowns.Remove(goal);
-		}
+    public void ForceReevaluation()
+    {
+        // Clear current goal and immediately re-evaluate
+        // This is used for high-priority interrupts (e.g. mate requests)
+        _currentGoal = null;
+        EvaluateAndSelectGoal();
+    }
 
-		// Check execution failure cooldown
-		if (_goalExecutionFailureCooldowns.TryGetValue(goal, out float execCooldownEnd))
-		{
-			if (currentTime < execCooldownEnd)
-			{
-				return true;
-			}
-			// Cooldown expired, remove it
-			_goalExecutionFailureCooldowns.Remove(goal);
-		}
+    private bool IsGoalOnCooldown(IUtilityGoal goal)
+    {
+        float currentTime = Time.GetTicksMsec() / 1000.0f;
 
-		return false;
-	}
+        // Check plan failure cooldown
+        if (_goalPlanFailureCooldowns.TryGetValue(goal, out float planCooldownEnd))
+        {
+            if (currentTime < planCooldownEnd)
+            {
+                return true;
+            }
+            // Cooldown expired, remove it
+            _goalPlanFailureCooldowns.Remove(goal);
+        }
 
-	private void EvaluateAndSelectGoal()
-	{
-		// Only called in response to executor events - never interrupts active plans
-		if (_availableGoals.Count == 0) return;
-		if (_executor == null) return;
+        // Check execution failure cooldown
+        if (_goalExecutionFailureCooldowns.TryGetValue(goal, out float execCooldownEnd))
+        {
+            if (currentTime < execCooldownEnd)
+            {
+                return true;
+            }
+            // Cooldown expired, remove it
+            _goalExecutionFailureCooldowns.Remove(goal);
+        }
 
-		IUtilityGoal bestGoal = null;
-		float bestUtility = float.MinValue;
+        return false;
+    }
 
-		for (int i = 0; i < _availableGoals.Count; i++)
-		{
-			var goal = _availableGoals[i];
-			if (IsGoalOnCooldown(goal))
-				continue;
+    private void EvaluateAndSelectGoal()
+    {
+        // Only called in response to executor events - never interrupts active plans
+        if (_availableGoals.Count == 0) return;
+        if (_executor == null) return;
 
-			float utility = goal.CalculateUtility(Entity);
-			if (utility > bestUtility)
-			{
-				bestUtility = utility;
-				bestGoal = goal;
-			}
-		}
+        IUtilityGoal bestGoal = null;
+        float bestUtility = float.MinValue;
 
-		if (bestGoal == null)
-		{
-			GD.Print($"[{Entity.Name}] All goals are on cooldown, nothing to do!");
-			_currentGoal = null;
-			return;
-		}
+        for (int i = 0; i < _availableGoals.Count; i++)
+        {
+            var goal = _availableGoals[i];
+            if (IsGoalOnCooldown(goal))
+                continue;
 
-		// Always switch to best available goal if current is null or different with significant utility
-		if (_currentGoal == null || (_currentGoal != bestGoal && bestUtility > 0.05f))
-		{
-			var oldGoal = _currentGoal?.Name ?? "None";
-			_currentGoal = bestGoal;
-			
-			// Bestow the new goal upon the executor
-			_executor.SetGoal(_currentGoal);
-		}
-	}
+            float utility = goal.CalculateUtility(Entity);
+            if (utility > bestUtility)
+            {
+                bestUtility = utility;
+                bestGoal = goal;
+            }
+        }
 
-	public void OnStart()
-	{
-		// Register available goals
-		_availableGoals.Add(new EatFoodGoal());
-		_availableGoals.Add(new StayWarmGoal());
-		_availableGoals.Add(new FindMateGoal());
-		_availableGoals.Add(new IdleGoal());
+        if (bestGoal == null)
+        {
+            // Safety Net: If all goals are on cooldown, force IdleGoal
+            var idleGoal = _availableGoals.FirstOrDefault(g => g is IdleGoal);
+            if (idleGoal != null)
+            {
+                LM.Info($"[{Entity.Name}] All goals on cooldown, forcing IdleGoal fallback.");
+                _goalPlanFailureCooldowns.Remove(idleGoal);
+                _goalExecutionFailureCooldowns.Remove(idleGoal);
+                bestGoal = idleGoal;
+            }
+            else
+            {
+                LM.Warning($"[{Entity.Name}] All goals are on cooldown and no IdleGoal found! Nothing to do!");
+                _currentGoal = null;
+                return;
+            }
+        }
 
-		GD.Print($"[{Entity.Name}] UtilityAI started with {_availableGoals.Count} goals");
-	}
+        // Always switch to best available goal if current is null or different with significant utility
+        if (_currentGoal == null || (_currentGoal != bestGoal && bestUtility > 0.05f))
+        {
+            var oldGoal = _currentGoal?.Name ?? "None";
+            _currentGoal = bestGoal;
 
-	public void OnPostAttached()
-	{
-		// Hook up to executor events
-		if (Entity.TryGetComponent(out _executor))
-		{
-			_executor.OnCannotPlan += OnExecutorCannotPlan;
-			_executor.OnPlanExecutionFailed += OnExecutorPlanExecutionFailed;
-			_executor.OnPlanSucceeded += OnExecutorPlanSucceeded;
-			_executor.OnGoalSatisfied += OnExecutorGoalSatisfied;
-			_executor.OnNeedNewGoal += OnExecutorNeedNewGoal;
+            // Bestow the new goal upon the executor
+            _executor.SetGoal(_currentGoal);
+        }
+    }
 
-			// Evaluate and assign initial goal
-			EvaluateAndSelectGoal();
-		}
-	}
+    public void OnStart()
+    {
+        // Register available goals
+        _availableGoals.Add(new EatFoodGoal());
+        _availableGoals.Add(new StayWarmGoal());
+        _availableGoals.Add(new FindMateGoal());
+        _availableGoals.Add(new RespondToMateGoal());
+        _availableGoals.Add(new IdleGoal());
+
+        LM.Info($"[{Entity.Name}] UtilityAI started with {_availableGoals.Count} goals");
+    }
+
+    public void OnPostAttached()
+    {
+        // Hook up to executor events
+        if (Entity.TryGetComponent(out _executor))
+        {
+            _executor.OnCannotPlan += OnExecutorCannotPlan;
+            _executor.OnPlanExecutionFailed += OnExecutorPlanExecutionFailed;
+            _executor.OnPlanSucceeded += OnExecutorPlanSucceeded;
+            _executor.OnGoalSatisfied += OnExecutorGoalSatisfied;
+            _executor.OnNeedNewGoal += OnExecutorNeedNewGoal;
+
+            // Evaluate and assign initial goal
+            EvaluateAndSelectGoal();
+        }
+    }
 }
 

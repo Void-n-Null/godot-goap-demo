@@ -36,6 +36,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// Fast array iteration, no dictionary overhead.
 	/// </summary>
 	private readonly List<IUpdatableEntity> _entities = new(MAX_ENTITIES);
+	private readonly HashSet<IUpdatableEntity> _entityLookup = new(MAX_ENTITIES);
 	private readonly List<IUpdatableEntity> _activeEntities = new(MAX_ENTITIES);
 	private SpatialIndex _spatialIndex;
 	private readonly HashSet<Entity> _spatialDirty = new();
@@ -235,34 +236,39 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// </summary>
 	public bool RegisterEntity(IUpdatableEntity entity)
 	{
+		if (entity == null)
+		{
+			return false;
+		}
+
 		if (_entities.Count >= MAX_ENTITIES)
 		{
 			GD.PushWarning($"EntityManager: Max entities ({MAX_ENTITIES}) reached");
 			return false;
 		}
 
-		if (!_entities.Contains(entity))
+		if (!_entityLookup.Add(entity))
 		{
-			_entities.Add(entity);
-			if (entity is Entity concrete)
-			{
-				_entityById[concrete.Id] = concrete;
-				EnsureSpatialIndex();
-				_spatialIndex.Sync(concrete);
-				HookSpatialTracking(concrete);
-				// Seed active list if already active BEFORE hooking events
-				// to avoid double-addition when the event fires
-				if (concrete.HasActiveComponents && !_activeEntities.Contains(concrete))
-				{
-					_activeEntities.Add(concrete);
-				}
-				HookActiveTracking(concrete);
-				WorldEventBus.Instance.PublishEntitySpawned(concrete);
-			}
-			return true;
+			return false;
 		}
 
-		return false;
+		_entities.Add(entity);
+		if (entity is Entity concrete)
+		{
+			_entityById[concrete.Id] = concrete;
+			EnsureSpatialIndex();
+			_spatialIndex.Sync(concrete);
+			HookSpatialTracking(concrete);
+			// Seed active list if already active BEFORE hooking events
+			// to avoid double-addition when the event fires
+			if (concrete.HasActiveComponents && !_activeEntities.Contains(concrete))
+			{
+				_activeEntities.Add(concrete);
+			}
+			HookActiveTracking(concrete);
+			WorldEventBus.Instance.PublishEntitySpawned(concrete);
+		}
+		return true;
 	}
 
 	/// <summary>
@@ -275,8 +281,14 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	/// </summary>
 	public bool UnregisterEntity(IUpdatableEntity entity)
 	{
+		if (entity == null)
+		{
+			return false;
+		}
+
 		if (_entities.Remove(entity))
 		{
+			_entityLookup.Remove(entity);
 			if (entity is Entity concrete)
 			{
 				_entityById.Remove(concrete.Id);
