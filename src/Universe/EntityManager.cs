@@ -5,6 +5,7 @@ using Game;
 using Game.Data;
 using Game.Data.Components;
 using TG = Game.Data.Tags;
+using Game.Utils;
 
 namespace Game.Universe;
 
@@ -120,7 +121,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		// Death spiral protection: if still processing previous tick, skip this one
 		if (_currentTickWork != null && !_currentTickWork.IsComplete)
 		{
-			GD.PushWarning($"EntityManager: Skipping tick - still processing previous tick ({_currentTickWork.StartIndex}/{_currentTickWork.TotalEntities} entities updated)");
+			LM.Warning($"EntityManager: Skipping tick - still processing previous tick ({_currentTickWork.StartIndex}/{_currentTickWork.TotalEntities} entities updated)");
 			return;
 		}
 
@@ -243,7 +244,7 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 
 		if (_entities.Count >= MAX_ENTITIES)
 		{
-			GD.PushWarning($"EntityManager: Max entities ({MAX_ENTITIES}) reached");
+			LM.Warning($"EntityManager: Max entities ({MAX_ENTITIES}) reached");
 			return false;
 		}
 

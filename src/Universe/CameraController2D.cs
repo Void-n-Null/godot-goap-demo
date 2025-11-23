@@ -107,14 +107,14 @@ public partial class CameraController2D : Camera2D
 		if (_isDragging && !_useFixedZoomAnchorDuringDrag)
 		{
 			_useFixedZoomAnchorDuringDrag = true;
-			_zoomAnchorWorld = GetGlobalMousePosition();
+			_zoomAnchorWorld = ViewContext.CachedMouseGlobalPosition ?? GetGlobalMousePosition();
 		}
 	}
 
 	private void HandleDragStart()
 	{
 		_isDragging = true;
-		_dragAnchorWorld = GetGlobalMousePosition();
+		_dragAnchorWorld = ViewContext.CachedMouseGlobalPosition ?? GetGlobalMousePosition();
 		_dragStartMouseScreen = GetViewport().GetMousePosition();
 		_passedDeadZone = false;
 		_lastDragInstantVelocity = Vector2.Zero;
@@ -203,14 +203,14 @@ public partial class CameraController2D : Camera2D
 			// Keep the initially captured world point under the cursor while dragging
 			var before = _zoomAnchorWorld;
 			Zoom = new Vector2(next, next);
-			var after = GetGlobalMousePosition();
+			var after = ViewContext.CachedMouseGlobalPosition ?? GetGlobalMousePosition();
 			correction = before - after;
 		}
 		else
 		{
-			var before = GetGlobalMousePosition();
+			var before = ViewContext.CachedMouseGlobalPosition ?? GetGlobalMousePosition();
 			Zoom = new Vector2(next, next);
-			var after = GetGlobalMousePosition();
+			var after = ViewContext.CachedMouseGlobalPosition ?? GetGlobalMousePosition();
 			correction = before - after;
 		}
 

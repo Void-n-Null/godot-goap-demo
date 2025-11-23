@@ -58,7 +58,7 @@ public sealed class EntityQuadTree
     
     private ElementData[] _elements;
     private int _elementCount;
-    private int _elementCapacity;
+
     private int _firstFreeElement = -1;
 
     private int _rootIndex = -1;
@@ -89,7 +89,6 @@ public sealed class EntityQuadTree
         // Initialize arrays with reasonable defaults to avoid immediate resizing
         _nodes = new NodeData[1024];
         _elements = new ElementData[2048];
-        _elementCapacity = 2048;
         _nodeStack = new int[maxDepth * 4 + 32];
 
         Reset(initialCenter ?? Vector2.Zero, Mathf.Max(initialExtent * 0.5f, minNodeSize));
@@ -704,7 +703,7 @@ public sealed class EntityQuadTree
             if (_elementCount >= _elements.Length)
             {
                 Array.Resize(ref _elements, _elements.Length * 2);
-                _elementCapacity = _elements.Length;
+
             }
             index = _elementCount++;
         }

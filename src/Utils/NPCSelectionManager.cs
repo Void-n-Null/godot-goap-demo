@@ -54,7 +54,7 @@ public partial class NPCSelectionManager : SingletonNode<NPCSelectionManager>
             mouseButton.ButtonIndex == MouseButton.Left &&
             mouseButton.Pressed)
         {
-            var mouseWorld = GetGlobalMousePosition();
+            var mouseWorld = MousePos();
             var clickedNPC = FindNPCAtPosition(mouseWorld);
 
             if (clickedNPC != null)
@@ -65,7 +65,7 @@ public partial class NPCSelectionManager : SingletonNode<NPCSelectionManager>
         }
     }
 
-    private Vector2 GetGlobalMousePosition()
+    private Vector2 MousePos()
     {
         if (ViewContext.CachedMouseGlobalPosition is Vector2 mouse)
             return mouse;

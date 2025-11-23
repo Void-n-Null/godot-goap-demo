@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://dq2aum37rpm8x"]
+[gd_scene load_steps=10 format=3 uid="uid://dq2aum37rpm8x"]
 
 [ext_resource type="Script" uid="uid://bq3gj5vumkyum" path="res://src/Universe/GameManager.cs" id="1_0wfyh"]
 [ext_resource type="Script" uid="uid://du6ym5nkamemi" path="res://src/Universe/EntityManager.cs" id="2_0wfyh"]
@@ -8,6 +8,7 @@
 [ext_resource type="Script" uid="uid://bohyud214g6jn" path="res://src/Utils/NPCSelectionManager.cs" id="6_selection_manager"]
 [ext_resource type="Script" uid="uid://b7ff6ej6ohdji" path="res://src/Utils/NPCSelectionVisualizer.cs" id="7_selection_visualizer"]
 [ext_resource type="Script" uid="uid://cq7yd8nkp3mno" path="res://src/Utils/ScenarioSelectorPanel.cs" id="8_scenario_selector"]
+[ext_resource type="Script" uid="uid://b3lhitap0dkj4" path="res://src/Universe/TorvieBenchmark.cs" id="9_85g3d"]
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_0wfyh")
@@ -38,3 +39,6 @@ BoxOffset = Vector2(0, -50)
 
 [node name="ScenarioSelectorPanel" type="Node" parent="."]
 script = ExtResource("8_scenario_selector")
+
+[node name="Node" type="Node" parent="."]
+script = ExtResource("9_85g3d")
