@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Game.Data.Components;
+using Game.Data.Crafting;
 
 namespace Game.Data.GOAP.GenericActions;
 
@@ -50,9 +51,34 @@ public class GenericStepFactory : IStepFactory
 
         RegisterChopTreeStep();
         RegisterConsumeFoodStep();
-        RegisterBuildCampfireStep();
+        RegisterCraftingSteps();
+        RegisterSleepInBedStep();
         RegisterIdleStep();
         RegisterMateSteps();
+    }
+
+    private void RegisterSleepInBedStep()
+    {
+        var pre = State.Empty();
+        pre.Set(FactKeys.NearTarget(TargetType.Bed), true);
+        pre.Set(FactKeys.WorldHas(TargetType.Bed), true);
+        pre.Set("IsSleepy", true);
+
+        var effects = new List<(string, object)>
+        {
+            ("IsSleepy", (FactValue)false),
+            (FactKeys.NearTarget(TargetType.Bed), (FactValue)false)
+        };
+
+        var config = new StepConfig("SleepInBed")
+        {
+            ActionFactory = () => new SleepInBedAction(),
+            Preconditions = pre,
+            Effects = effects,
+            CostFactory = _ => 1.0
+        };
+
+        _stepConfigs.Add(config);
     }
 
     private void RegisterMoveToTargetStep(TargetType type)
@@ -313,39 +339,54 @@ public class GenericStepFactory : IStepFactory
         _stepConfigs.Add(config);
     }
 
-    private void RegisterBuildCampfireStep()
+    private void RegisterCraftingSteps()
     {
-        var pre = State.Empty();
-        pre.Set(FactKeys.AgentHas(TargetType.Stick), true);
-        pre.Set(FactKeys.AgentCount(TargetType.Stick), 2);
-
-        var effects = new List<(string, object)>
+        foreach (var recipe in CraftingRegistry.Recipes)
         {
-            ("HasCampfire", (FactValue)true),
-            (FactKeys.WorldHas(TargetType.Campfire), (FactValue)true),
-            (FactKeys.NearTarget(TargetType.Campfire), (FactValue)true),
-            (FactKeys.WorldCount(TargetType.Campfire), (Func<State, FactValue>)(ctx =>
+            var pre = State.Empty();
+            foreach (var kvp in recipe.Ingredients)
             {
-                if (ctx.TryGet(FactKeys.WorldCount(TargetType.Campfire), out var existing))
-                    return existing.IntValue + 1;
-                return 1;
-            })),
-             (FactKeys.AgentCount(TargetType.Stick), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.AgentCount(TargetType.Stick), out var c))
-                    return Math.Max(0, c.IntValue - 2);
-                return 0;
-            }))
-        };
+                pre.Set(FactKeys.AgentHas(kvp.Key), true);
+                pre.Set(FactKeys.AgentCount(kvp.Key), kvp.Value);
+            }
 
-        var config = new StepConfig("BuildCampfire")
-        {
-            ActionFactory = () => new BuildCampfireAction(sticksRequired: 2, buildTime: 5.0f),
-            Preconditions = pre,
-            Effects = effects,
-            CostFactory = _ => 10.0
-        };
+            var effects = new List<(string, object)>
+            {
+                (FactKeys.WorldHas(recipe.OutputType), (FactValue)true),
+                (FactKeys.NearTarget(recipe.OutputType), (FactValue)true),
+                (FactKeys.WorldCount(recipe.OutputType), (Func<State, FactValue>)(ctx =>
+                {
+                    if (ctx.TryGet(FactKeys.WorldCount(recipe.OutputType), out var existing))
+                        return existing.IntValue + 1;
+                    return 1;
+                }))
+            };
 
-        _stepConfigs.Add(config);
+            foreach (var kvp in recipe.Ingredients)
+            {
+                effects.Add((FactKeys.AgentCount(kvp.Key), (Func<State, FactValue>)(ctx => {
+                    if (ctx.TryGet(FactKeys.AgentCount(kvp.Key), out var c))
+                        return Math.Max(0, c.IntValue - kvp.Value);
+                    return 0;
+                })));
+            }
+
+            // For campfire, we add the legacy key just in case
+            if (recipe.OutputType == TargetType.Campfire)
+            {
+                effects.Add(("HasCampfire", (FactValue)true));
+            }
+
+            var config = new StepConfig(recipe.Name)
+            {
+                ActionFactory = () => new BuildItemAction(recipe),
+                Preconditions = pre,
+                Effects = effects,
+                CostFactory = _ => 10.0
+            };
+
+            _stepConfigs.Add(config);
+        }
     }
 
     public List<Step> CreateSteps(State initialState)

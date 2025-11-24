@@ -46,6 +46,8 @@ public class AIGoalExecutor : IActiveComponent
     private static readonly int[] _distanceFactIds;
     private static readonly int HungerFactId;
     private static readonly int IsHungryFactId;
+    private static readonly int SleepinessFactId;
+    private static readonly int IsSleepyFactId;
 
     private bool[] _proximityNear;
     private int[] _availabilityCounts;
@@ -59,7 +61,7 @@ public class AIGoalExecutor : IActiveComponent
     private const float PROXIMITY_UPDATE_INTERVAL = 0.25f;
     private const float STATE_REBUILD_INTERVAL = 0.25f;
     private const float DIRTY_REBUILD_INTERVAL = 0.05f;
-    private const float WORLD_EVENT_RADIUS = 2000f;
+    private const float WORLD_EVENT_RADIUS = 1000f;
     private const float WORLD_EVENT_RADIUS_SQ = WORLD_EVENT_RADIUS * WORLD_EVENT_RADIUS;
     private const int MAX_PROXIMITY_RESULTS = 256;
     private const int MAX_AVAILABLE_PER_TYPE = 6;
@@ -76,6 +78,8 @@ public class AIGoalExecutor : IActiveComponent
         _distanceFactIds = new int[_cachedTargetTypes.Length];
         HungerFactId = FactRegistry.GetId("Hunger");
         IsHungryFactId = FactRegistry.GetId("IsHungry");
+        SleepinessFactId = FactRegistry.GetId("Sleepiness");
+        IsSleepyFactId = FactRegistry.GetId("IsSleepy");
 
         for (int i = 0; i < _cachedTargetTypes.Length; i++)
         {
@@ -316,7 +320,8 @@ public class AIGoalExecutor : IActiveComponent
             FactKeys.WorldHas(TargetType.Tree),
             FactKeys.WorldCount(TargetType.Food),
             FactKeys.WorldHas(TargetType.Food),
-            "Hunger"
+            "Hunger",
+            "IsSleepy"
         };
 
         foreach (var key in keyFacts)
@@ -379,6 +384,15 @@ public class AIGoalExecutor : IActiveComponent
             }
         }
 
+        // Only force replan if the event is relevant to our current goal
+        if (!entity.TryGetComponent<TargetComponent>(out var targetComp)) return;
+
+        var currentGoalState = _currentGoal?.GetGoalState(Entity);
+        if (currentGoalState != null && !GoalReferencesTarget(currentGoalState, targetComp.Target))
+        {
+            return;
+        }
+
         _stateDirty = true;
         _lastStateBuildTime = float.NegativeInfinity; // force immediate rebuild next tick
         _forceReplan = true;
@@ -386,11 +400,7 @@ public class AIGoalExecutor : IActiveComponent
 
         if (_currentPlan != null && !_currentPlan.IsComplete)
         {
-            // Need target component to check invalidation
-            if (!entity.TryGetComponent<TargetComponent>(out var targetComp)) return;
-
-            var currentGoalState = _currentGoal?.GetGoalState(Entity);
-            if (currentGoalState != null && GoalReferencesTarget(currentGoalState, targetComp.Target))
+            if (currentGoalState != null)
             {
                 LM.Info($"[{Entity.Name}] World event for {targetComp.Target} invalidated current plan, cancelling.");
                 _currentPlan.Cancel(Entity);
@@ -528,6 +538,8 @@ public class AIGoalExecutor : IActiveComponent
 
         state.Set(HungerFactId, npcData.Hunger);
         state.Set(IsHungryFactId, npcData.Hunger > 30f); // Explicit boolean for simple preconditions
+        state.Set(SleepinessFactId, npcData.Sleepiness);
+        state.Set(IsSleepyFactId, npcData.Sleepiness > 70f);
     }
 
     private bool ShouldRefreshProximity(float currentTime)

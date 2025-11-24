@@ -57,10 +57,12 @@ public static class NPC
             new AIGoalExecutor()
         ],
         addMutators: [
-            // Randomize starting hunger (0-80% so some NPCs start hungry)
+            // Set specific starting stats for demonstration
             EntityBlueprint.Mutate<NPCData>((npc) =>
             {
-                npc.Hunger = Random.NextFloat(0f, 80f);
+                npc.Hunger = 0f;
+                npc.Thirst = 20f;
+                npc.Sleepiness = 50f;
                 npc.MatingDesire = Random.NextFloat(5f, 30f);
             })
         ]

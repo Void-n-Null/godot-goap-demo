@@ -60,10 +60,10 @@ public class NPCData : IActiveComponent
         Temperature -= (float)delta * 0.1f;
         Temperature = Mathf.Clamp(Temperature, 0f, 100f);
 
-        // We slowly lose hunger and thirst and sleepiness
-        Hunger -= (float)delta * 0.1f;
-        Thirst -= (float)delta * 0.1f;
-        Sleepiness -= (float)delta * 0.1f;
+        // We slowly gain hunger and thirst and sleepiness
+        Hunger += (float)delta * 0.5f;
+        Thirst += (float)delta * 0.5f;
+        Sleepiness += (float)delta * 0.3f;
 
         Hunger = Mathf.Clamp(Hunger, 0f, MaxHunger);
         Thirst = Mathf.Clamp(Thirst, 0f, MaxThirst);
