@@ -26,11 +26,11 @@ public class UtilityGoalSelector : IActiveComponent
 
     // Track goals that failed to plan (couldn't find a path)
     private Dictionary<IUtilityGoal, float> _goalPlanFailureCooldowns = new();
-    private const float PLAN_FAILURE_COOLDOWN = 5.0f; // Don't retry for 5 seconds if no plan found
+    private const float DEFAULT_PLAN_FAILURE_COOLDOWN = 5.0f; // Fallback if goal doesn't override
 
     // Track goals that failed during execution
     private Dictionary<IUtilityGoal, float> _goalExecutionFailureCooldowns = new();
-    private const float EXECUTION_FAILURE_COOLDOWN = 2.0f; // Small cooldown for execution failures
+    private const float DEFAULT_EXECUTION_FAILURE_COOLDOWN = 2.0f; // Fallback if goal doesn't override
 
     private AIGoalExecutor _executor;
 
@@ -44,8 +44,9 @@ public class UtilityGoalSelector : IActiveComponent
     {
         string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
         string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
-        LM.Warning($"[{nameFirstWord} {idFirst6}] Executor couldn't find plan for '{goal.Name}', applying {PLAN_FAILURE_COOLDOWN}s cooldown");
-        _goalPlanFailureCooldowns[goal] = GameManager.Instance.CachedTimeMsec / 1000.0f + PLAN_FAILURE_COOLDOWN;
+        float cooldown = GetPlanFailureCooldown(goal);
+        LM.Warning($"[{nameFirstWord} {idFirst6}] Executor couldn't find plan for '{goal.Name}', applying {cooldown}s cooldown");
+        _goalPlanFailureCooldowns[goal] = GameManager.Instance.CachedTimeMsec / 1000.0f + cooldown;
         _currentGoal = null;
         EvaluateAndSelectGoal();
     }
@@ -54,11 +55,12 @@ public class UtilityGoalSelector : IActiveComponent
     {
         string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
         string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
-        LM.Warning($"[{nameFirstWord} {idFirst6}] Executor's plan execution failed for '{goal.Name}', applying {EXECUTION_FAILURE_COOLDOWN}s cooldown");
+        float cooldown = GetExecutionFailureCooldown(goal);
+        LM.Warning($"[{nameFirstWord} {idFirst6}] Executor's plan execution failed for '{goal.Name}', applying {cooldown}s cooldown");
 
         // Always apply cooldown on execution failure to prevent jittery loops.
         // If it's truly urgent, they can try again after a short break.
-        _goalExecutionFailureCooldowns[goal] = GameManager.Instance.CachedTimeMsec / 1000.0f + EXECUTION_FAILURE_COOLDOWN;
+        _goalExecutionFailureCooldowns[goal] = GameManager.Instance.CachedTimeMsec / 1000.0f + cooldown;
 
         _currentGoal = null;
         EvaluateAndSelectGoal();
@@ -206,6 +208,23 @@ public class UtilityGoalSelector : IActiveComponent
             // Evaluate and assign initial goal
             EvaluateAndSelectGoal();
         }
+    }
+    private static float GetPlanFailureCooldown(IUtilityGoal goal)
+    {
+        if (goal is IUtilityGoalCooldowns custom)
+        {
+            return Math.Max(0f, custom.PlanFailureCooldownSeconds);
+        }
+        return DEFAULT_PLAN_FAILURE_COOLDOWN;
+    }
+
+    private static float GetExecutionFailureCooldown(IUtilityGoal goal)
+    {
+        if (goal is IUtilityGoalCooldowns custom)
+        {
+            return Math.Max(0f, custom.ExecutionFailureCooldownSeconds);
+        }
+        return DEFAULT_EXECUTION_FAILURE_COOLDOWN;
     }
 }
 

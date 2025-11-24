@@ -20,6 +20,10 @@ public class SleepGoal : IUtilityGoal
 
         float sleepiness = npcData.Sleepiness;
         
+        // If sleepiness is very low, no need to sleep
+        if (sleepiness <= 5f)
+            return 0f;
+        
         // Linear curve: 0 utility at 30 sleepiness, up to 1.0 at 100
         float utility = Mathf.Clamp((sleepiness - 30f) / 70f, 0f, 1f);
 
@@ -28,10 +32,12 @@ public class SleepGoal : IUtilityGoal
             utility += 0.2f; // Panic bonus when exhausted
         }
 
-        // If we are already sleeping (IsSleepy fact false, but sleepiness high? No wait, IsSleepy is the goal condition)
-        // If we are successfully sleeping, utility should drop? 
-        // Actually, UtilityGoalSelector picks the highest utility. If we are sleeping, sleepiness decreases.
-        // As sleepiness decreases, utility decreases, eventually another goal takes over.
+        // CRITICAL: If we're above the threshold, maintain high utility until fully rested
+        // This prevents the goal from being interrupted mid-sleep
+        if (sleepiness > SleepThreshold)
+        {
+            utility = Mathf.Max(utility, 0.85f); // Keep utility high enough to stay committed
+        }
 
         return Mathf.Clamp(utility, 0f, 1f);
     }

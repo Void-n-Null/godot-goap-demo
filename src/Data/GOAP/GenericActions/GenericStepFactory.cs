@@ -342,25 +342,25 @@ public class GenericStepFactory : IStepFactory
     private void RegisterCraftingSteps()
     {
         foreach (var recipe in CraftingRegistry.Recipes)
-        {
-            var pre = State.Empty();
+    {
+        var pre = State.Empty();
             foreach (var kvp in recipe.Ingredients)
             {
                 pre.Set(FactKeys.AgentHas(kvp.Key), true);
                 pre.Set(FactKeys.AgentCount(kvp.Key), kvp.Value);
             }
 
-            var effects = new List<(string, object)>
-            {
+        var effects = new List<(string, object)>
+        {
                 (FactKeys.WorldHas(recipe.OutputType), (FactValue)true),
                 (FactKeys.NearTarget(recipe.OutputType), (FactValue)true),
                 (FactKeys.WorldCount(recipe.OutputType), (Func<State, FactValue>)(ctx =>
-                {
+            {
                     if (ctx.TryGet(FactKeys.WorldCount(recipe.OutputType), out var existing))
-                        return existing.IntValue + 1;
-                    return 1;
-                }))
-            };
+                    return existing.IntValue + 1;
+                return 1;
+            }))
+        };
 
             foreach (var kvp in recipe.Ingredients)
             {
@@ -378,14 +378,14 @@ public class GenericStepFactory : IStepFactory
             }
 
             var config = new StepConfig(recipe.Name)
-            {
+        {
                 ActionFactory = () => new BuildItemAction(recipe),
-                Preconditions = pre,
-                Effects = effects,
-                CostFactory = _ => 10.0
-            };
+            Preconditions = pre,
+            Effects = effects,
+            CostFactory = _ => 10.0
+        };
 
-            _stepConfigs.Add(config);
+        _stepConfigs.Add(config);
         }
     }
 

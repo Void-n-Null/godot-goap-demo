@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-using System.Linq;
 using Game.Data;
 using Game.Data.Components;
 using Game.Data.GOAP;
@@ -7,14 +5,17 @@ using Godot;
 
 namespace Game.Data.UtilityAI;
 
-public class StayWarmGoal : IUtilityGoal
+public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTargetInterest
 {
     private const float ComfortableTemperature = 70f;
     private const float CriticalTemperature = 30f;
     private const float WarmthRadius = 150f;
 
     public string Name => "Stay Warm";
+
     
+    public float PlanFailureCooldownSeconds => 0.25f;
+    public float ExecutionFailureCooldownSeconds => 0.25f;
     public float CalculateUtility(Entity agent)
     {
         if (!agent.TryGetComponent<NPCData>(out var npcData))
@@ -77,5 +78,11 @@ public class StayWarmGoal : IUtilityGoal
                 maxResults: 1);
 
         return nearbyCampfires != null && nearbyCampfires.Count > 0;
+    }
+
+    public bool IsTargetTypeRelevant(TargetType targetType)
+    {
+        // Only campfires should cause immediate replanning; harvested sticks are tracked via state updates.
+        return targetType == TargetType.Campfire;
     }
 }

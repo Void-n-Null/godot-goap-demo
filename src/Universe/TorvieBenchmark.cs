@@ -18,12 +18,12 @@ namespace Game.Universe;
 /// </summary>
 public partial class TorvieBenchmark : Node
 {
-	private readonly struct StayWarmScenario
+	private readonly struct SleepScenario
 	{
 		public string Name { get; }
 		public Action<State> Configure { get; }
 
-		public StayWarmScenario(string name, Action<State> configure)
+		public SleepScenario(string name, Action<State> configure)
 		{
 			Name = name;
 			Configure = configure;
@@ -40,28 +40,32 @@ public partial class TorvieBenchmark : Node
 
 	private static readonly int[] ParallelAgentBatches = { 50, 100, 200, 500, 1_000, 2_000, 3_000, 5_000 };
 
-	private static readonly StayWarmScenario[] StayWarmScenarios =
+	private static readonly SleepScenario[] SleepScenarios =
 	{
-		new("CampfireNearby", state =>
+		new("BedNearby", state =>
 		{
-			state.Set(FactKeys.WorldHas(TargetType.Campfire), true);
-			state.Set(FactKeys.WorldCount(TargetType.Campfire), 1);
-			// Need to walk to an existing fire.
+			state.Set(FactKeys.WorldHas(TargetType.Bed), true);
+			state.Set(FactKeys.WorldCount(TargetType.Bed), 1);
+			state.Set("IsSleepy", true);
+			// Need to walk to an existing bed.
 		}),
 		new("InventoryHasSticks", state =>
 		{
 			state.Set(FactKeys.AgentHas(TargetType.Stick), true);
-			state.Set(FactKeys.AgentCount(TargetType.Stick), 2);
+			state.Set(FactKeys.AgentCount(TargetType.Stick), 4);
+			state.Set("IsSleepy", true);
 		}),
 		new("GatherDroppedSticks", state =>
 		{
 			state.Set(FactKeys.WorldHas(TargetType.Stick), true);
-			state.Set(FactKeys.WorldCount(TargetType.Stick), 6);
+			state.Set(FactKeys.WorldCount(TargetType.Stick), 8);
+			state.Set("IsSleepy", true);
 		}),
 		new("FullPipelineFromTrees", state =>
 		{
 			state.Set(FactKeys.WorldHas(TargetType.Tree), true);
 			state.Set(FactKeys.WorldCount(TargetType.Tree), 40);
+			state.Set("IsSleepy", true);
 		})
 	};
 
@@ -262,9 +266,9 @@ public partial class TorvieBenchmark : Node
 
 		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
-		var stayWarmGoal = BuildStayWarmGoalState();
-		BenchmarkStayWarmScenarios(stayWarmGoal);
-		BenchmarkParallelStayWarm(stayWarmGoal);
+		var sleepGoal = BuildSleepGoalState();
+		BenchmarkSleepScenarios(sleepGoal);
+		BenchmarkParallelSleep(sleepGoal);
 	}
 
 	private void SpawnBenchmarkEntities(int count)
@@ -297,22 +301,22 @@ public partial class TorvieBenchmark : Node
 		}
 	}
 
-	private void BenchmarkStayWarmScenarios(State goal)
+	private void BenchmarkSleepScenarios(State goal)
 	{
 		_results.Add("Section,Scenario,PlanSteps,PlanMs");
 
-		foreach (var scenario in StayWarmScenarios)
+		foreach (var scenario in SleepScenarios)
 		{
-			var initial = CreateBaseStayWarmState();
+			var initial = CreateBaseSleepState();
 			scenario.Configure(initial);
 			var plan = MeasurePlan(initial, goal, out double elapsedMs);
 			int steps = plan?.Steps.Count ?? 0;
 			GD.Print($"Scenario {scenario.Name}: {steps} steps in {elapsedMs:F3} ms");
-			_results.Add($"GOAP_StayWarm,{scenario.Name},{steps},{elapsedMs:F3}");
+			_results.Add($"GOAP_Sleep,{scenario.Name},{steps},{elapsedMs:F3}");
 		}
 	}
 
-	private void BenchmarkParallelStayWarm(State goalState)
+	private void BenchmarkParallelSleep(State goalState)
 	{
 		_results.Add("Section,Agents,TotalMs,MsPerPlan,AvgSteps,FailedPlans");
 
@@ -322,7 +326,7 @@ public partial class TorvieBenchmark : Node
 			var initialStates = new State[agentBatch];
 			for (int i = 0; i < agentBatch; i++)
 			{
-				initialStates[i] = CreateRandomizedStayWarmState(random, i);
+				initialStates[i] = CreateRandomizedSleepState(random, i);
 			}
 
 			long totalSteps = 0;
@@ -353,19 +357,20 @@ public partial class TorvieBenchmark : Node
 		}
 	}
 
-	private static State BuildStayWarmGoalState()
+	private static State BuildSleepGoalState()
 	{
 		var goal = new State();
-		goal.Set(FactKeys.NearTarget(TargetType.Campfire), true);
+		goal.Set("IsSleepy", false);
 		return goal;
 	}
 
-	private static State CreateBaseStayWarmState()
+	private static State CreateBaseSleepState()
 	{
 		var state = new State();
-		state.Set(FactKeys.NearTarget(TargetType.Campfire), false);
-		state.Set(FactKeys.WorldHas(TargetType.Campfire), false);
-		state.Set(FactKeys.WorldCount(TargetType.Campfire), 0);
+		state.Set("IsSleepy", true);
+		state.Set(FactKeys.NearTarget(TargetType.Bed), false);
+		state.Set(FactKeys.WorldHas(TargetType.Bed), false);
+		state.Set(FactKeys.WorldCount(TargetType.Bed), 0);
 		state.Set(FactKeys.AgentHas(TargetType.Stick), false);
 		state.Set(FactKeys.AgentCount(TargetType.Stick), 0);
 		state.Set(FactKeys.WorldHas(TargetType.Stick), false);
@@ -377,39 +382,33 @@ public partial class TorvieBenchmark : Node
 		return state;
 	}
 
-	private static State CreateFullPipelineStayWarmState()
+	private static State CreateRandomizedSleepState(StdRandom random, int agentId)
 	{
-		var state = CreateBaseStayWarmState();
-		state.Set(FactKeys.WorldHas(TargetType.Tree), true);
-		state.Set(FactKeys.WorldCount(TargetType.Tree), 50);
-		return state;
-	}
-
-	private static State CreateRandomizedStayWarmState(StdRandom random, int agentId)
-	{
-		var state = CreateBaseStayWarmState();
+		var state = CreateBaseSleepState();
 
 		// Randomize agent inventory and proximity.
 		bool agentHasStick = random.NextDouble() < 0.45;
-		int agentStickCount = agentHasStick ? random.Next(1, 5) : 0;
+		int agentStickCount = agentHasStick ? random.Next(1, 6) : 0;
 		state.Set(FactKeys.AgentHas(TargetType.Stick), agentHasStick);
 		state.Set(FactKeys.AgentCount(TargetType.Stick), agentStickCount);
 		state.Set(FactKeys.NearTarget(TargetType.Stick), random.NextDouble() < 0.35);
 		state.Set(FactKeys.NearTarget(TargetType.Tree), random.NextDouble() < 0.35);
 
 		// Randomize world availability for primary resources.
-		bool worldHasSticks = random.NextDouble() < 0.8;
+		// Ensure sticks are more available (beds need 4 sticks vs campfire's 2)
+		bool worldHasSticks = random.NextDouble() < 0.85;
 		state.Set(FactKeys.WorldHas(TargetType.Stick), worldHasSticks);
-		state.Set(FactKeys.WorldCount(TargetType.Stick), worldHasSticks ? random.Next(2, 15) : 0);
+		state.Set(FactKeys.WorldCount(TargetType.Stick), worldHasSticks ? random.Next(4, 20) : 0);
 
-		bool worldHasTrees = random.NextDouble() < 0.95;
+		// Trees should be almost always available as the fallback resource
+		bool worldHasTrees = random.NextDouble() < 0.99;
 		state.Set(FactKeys.WorldHas(TargetType.Tree), worldHasTrees);
-		state.Set(FactKeys.WorldCount(TargetType.Tree), worldHasTrees ? random.Next(10, 75) : 0);
+		state.Set(FactKeys.WorldCount(TargetType.Tree), worldHasTrees ? random.Next(20, 100) : 0);
 
-		bool worldHasCampfire = random.NextDouble() < 0.4;
-		state.Set(FactKeys.WorldHas(TargetType.Campfire), worldHasCampfire);
-		state.Set(FactKeys.WorldCount(TargetType.Campfire), worldHasCampfire ? random.Next(1, 4) : 0);
-		state.Set(FactKeys.NearTarget(TargetType.Campfire), worldHasCampfire && random.NextDouble() < 0.2);
+		bool worldHasBed = random.NextDouble() < 0.3;
+		state.Set(FactKeys.WorldHas(TargetType.Bed), worldHasBed);
+		state.Set(FactKeys.WorldCount(TargetType.Bed), worldHasBed ? random.Next(1, 3) : 0);
+		state.Set(FactKeys.NearTarget(TargetType.Bed), worldHasBed && random.NextDouble() < 0.2);
 
 		// Inject per-agent identity to avoid clone states.
 		state.Set(FactKeys.AgentId, agentId);

@@ -8,6 +8,7 @@ using Game.Universe;
 using System.Threading.Tasks;
 using Game.Data.UtilityAI;
 using Game.Utils;
+using TargetType = Game.Data.Components.TargetType;
 
 namespace Game.Data.Components;
 
@@ -22,7 +23,6 @@ public class AIGoalExecutor : IActiveComponent
     private Task<Plan> _planningTask;
     public bool PlanningInProgress { get; private set; }
     private IUtilityGoal _currentGoal;
-    private float timer = 0f;
 
     private State _cachedState;
     private State _lastPlanningState = new State();
@@ -125,8 +125,7 @@ public class AIGoalExecutor : IActiveComponent
 
     public void Update(double delta)
     {
-        float currentTime = timer / 1000.0f;
-        timer += (float)delta;
+        float currentTime = GameManager.Instance.CachedTimeMsec / 1000.0f;
 
         // Watchdog: If we have no plan and aren't planning for too long, force a kick
         if (_currentPlan == null && !PlanningInProgress && _currentGoal != null)
@@ -410,6 +409,11 @@ public class AIGoalExecutor : IActiveComponent
 
     private bool GoalReferencesTarget(State goalState, TargetType targetType)
     {
+        if (_currentGoal is IUtilityGoalTargetInterest interest && interest.IsTargetTypeRelevant(targetType))
+        {
+            return true;
+        }
+
         var nearKey = FactKeys.NearTarget(targetType);
         var worldHasKey = FactKeys.WorldHas(targetType);
         var worldCountKey = FactKeys.WorldCount(targetType);

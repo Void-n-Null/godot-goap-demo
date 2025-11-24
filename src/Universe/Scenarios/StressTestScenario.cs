@@ -13,13 +13,13 @@ public class StressTestScenario : Scenario
     public override string Description => "High entity count for performance testing (1000 NPCs, 3000 trees, 3000 food)";
     public override string Entities => "700 NPCs, 2100 Trees, 2100 Food";
 
-    const int StressfulNPCCount = 700;
+    const int StressfulNPCCount = 800;
     public override void Setup()
     {
         Log("Setting up stress test scenario...");
 
         // Spawn lots of trees
-        for (int i = 0; i < (StressfulNPCCount * 3); i++)
+        for (int i = 0; i < (StressfulNPCCount * 4); i++)
             SpawnEntity.Now(Nature.SimpleTree, Random.NextVector2(-10000, 10000));
 
         // Spawn lots of food

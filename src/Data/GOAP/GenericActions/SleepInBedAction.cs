@@ -76,8 +76,10 @@ public sealed class SleepInBedAction : PeriodicGuardAction
             // Decrease sleepiness
             npcData.Sleepiness = Mathf.Max(0, npcData.Sleepiness - (dt * 10f)); // Sleep recovers 10 units per second
 
-            if (npcData.Sleepiness <= 0)
+            // Wake up when well-rested (sleepiness < 5)
+            if (npcData.Sleepiness < 5f)
             {
+                LM.Info($"[{agent.Name}] Waking up! Sleepiness: {npcData.Sleepiness}");
                 RestorePosture(agent);
                 _completed = true;
                 return ActionStatus.Succeeded;
@@ -94,6 +96,7 @@ public sealed class SleepInBedAction : PeriodicGuardAction
 
     public override void Exit(Entity agent, ActionExitReason reason)
     {
+        LM.Info($"[{agent.Name}] SleepInBedAction.Exit called with reason: {reason}");
         RestorePosture(agent);
     }
 
@@ -154,12 +157,23 @@ public sealed class SleepInBedAction : PeriodicGuardAction
     private void RestorePosture(Entity agent)
     {
         if (_postureRestored)
+        {
+            LM.Info($"[{agent.Name}] RestorePosture: Already restored, skipping");
             return;
+        }
 
         _postureRestored = true;
 
         if (agent.TryGetComponent<TransformComponent2D>(out var transform))
+        {
+            LM.Info($"[{agent.Name}] RestorePosture: Setting rotation from {transform.Rotation} to 0");
             transform.Rotation = 0f;
+            LM.Info($"[{agent.Name}] RestorePosture: Rotation is now {transform.Rotation}");
+        }
+        else
+        {
+            LM.Warning($"[{agent.Name}] RestorePosture: No TransformComponent2D found!");
+        }
 
         if (agent.TryGetComponent<NPCMotorComponent>(out var motor))
         {

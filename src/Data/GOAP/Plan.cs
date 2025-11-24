@@ -132,6 +132,12 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 
 	if (_currentStepIndex >= _steps.Count - 1)
 	{
+		// Final step completed - ensure we clean up the action before marking complete
+		if (_currentAction != null)
+		{
+			_currentAction.Exit(agent, ActionExitReason.Completed);
+			_currentAction = null;
+		}
 		IsComplete = true;
 		Succeeded = true;
 		return true;
