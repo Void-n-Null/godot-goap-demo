@@ -1,5 +1,6 @@
 using Godot;
 using Game.Utils;
+using Game.Universe;
 
 namespace Game.Data.GOAP;
 
@@ -19,7 +20,7 @@ public abstract class PeriodicGuardAction : IAction, IRuntimeGuard
         float currentTimeSeconds = FrameTime.TimeSeconds;
         if (FrameTime.FrameIndex == 0 && currentTimeSeconds <= 0f)
         {
-            currentTimeSeconds = Time.GetTicksMsec() / 1000f;
+            currentTimeSeconds = GameManager.Instance.CachedTimeMsec / 1000f;
         }
 
         if (currentTimeSeconds - _lastGuardCheck >= _guardInterval)

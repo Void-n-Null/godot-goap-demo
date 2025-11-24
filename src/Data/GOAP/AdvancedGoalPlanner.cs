@@ -71,12 +71,15 @@ public static class AdvancedGoalPlanner
         Step step,
         PathNode currentPath,
         double currentGCost,
-        State goalState)
+        State goalState,
+        State implicitGoals)
     {
         var newState = currentState.Clone();
 
-        foreach (var kvp in step.Effects)
+        var compiledEffects = step.CompiledEffects;
+        for (int i = 0; i < compiledEffects.Length; i++)
         {
+            var kvp = compiledEffects[i];
             var resolvedValue = ResolveEffectValue(kvp.Value, currentState);
             newState.Set(kvp.Key, resolvedValue);
         }
@@ -85,7 +88,7 @@ public static class AdvancedGoalPlanner
 
         double stepCost = step.GetCost(currentState);
         double newGCost = currentGCost + stepCost;
-        float heuristic = StateComparison.CalculateStateComparisonHeuristic(newState, goalState);
+        float heuristic = StateComparison.CalculateStateComparisonHeuristic(newState, goalState, implicitGoals);
         float fScore = (float)newGCost + heuristic;
 
         return (newState, newPath, newGCost, fScore);
@@ -167,6 +170,48 @@ public static class AdvancedGoalPlanner
     }
 
     /// <summary>
+    /// Infers implicit resource requirements for goal facts by inspecting producer steps.
+    /// </summary>
+    private static State DeriveImplicitRequirements(State currentState, State goalState, List<Step> availableSteps)
+    {
+        var implicitState = new State();
+
+        foreach (var goalFact in goalState.FactsById)
+        {
+            // Skip prerequisites that are already satisfied
+            if (currentState.TryGet(goalFact.Key, out var curVal) && curVal.Equals(goalFact.Value))
+                continue;
+
+            var producer = availableSteps.FirstOrDefault(step =>
+            {
+                var effects = step.CompiledEffects;
+                for (int i = 0; i < effects.Length; i++)
+                {
+                    if (effects[i].Key == goalFact.Key)
+                    {
+                        var effectValue = FactValue.From(effects[i].Value);
+                        if (effectValue.Equals(goalFact.Value)) return true;
+                    }
+                }
+                return false;
+            });
+
+            if (producer == null)
+                continue;
+
+            foreach (var pre in producer.Preconditions.FactsById)
+            {
+                if (pre.Value.Type == FactType.Int || pre.Value.Type == FactType.Float)
+                {
+                    implicitState.Set(pre.Key, pre.Value);
+                }
+            }
+        }
+
+        return implicitState;
+    }
+
+    /// <summary>
     /// Prunes steps that are irrelevant to the goal using dependency analysis.
     /// Keeps steps that directly achieve the goal plus steps that enable them (transitive closure).
     /// </summary>
@@ -179,9 +224,20 @@ public static class AdvancedGoalPlanner
         foreach (var step in allSteps)
         {
             // Check if any effect contributes to any goal fact
-            foreach (var goalFact in goalState.Facts)
+            var compiledEffects = step.CompiledEffects;
+            foreach (var goalFact in goalState.FactsById)
             {
-                if (step.Effects.Any(e => e.Key == goalFact.Key))
+                bool found = false;
+                for (int i = 0; i < compiledEffects.Length; i++)
+                {
+                    if (compiledEffects[i].Key == goalFact.Key)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (found)
                 {
                     relevant.Add(step);
                     queue.Enqueue(step);
@@ -203,13 +259,18 @@ public static class AdvancedGoalPlanner
 
                 // Does this step provide any precondition for current?
                 bool providesPrerequisite = false;
-                foreach (var precondition in current.Preconditions.Facts)
+                var stepEffects = step.CompiledEffects;
+                foreach (var precondition in current.Preconditions.FactsById)
                 {
-                    if (step.Effects.Any(e => e.Key == precondition.Key))
+                    for (int i = 0; i < stepEffects.Length; i++)
                     {
-                        providesPrerequisite = true;
-                        break;
+                        if (stepEffects[i].Key == precondition.Key)
+                        {
+                            providesPrerequisite = true;
+                            break;
+                        }
                     }
+                    if (providesPrerequisite) break;
                 }
 
                 if (providesPrerequisite)
@@ -257,12 +318,13 @@ public static class AdvancedGoalPlanner
         config ??= DefaultConfig;
         //Alright, when we start, these are all the steps we can take.
         var steps = GenerateStepsForState(initialState, goalState);
+        var implicitGoals = DeriveImplicitRequirements(initialState, goalState, steps);
 
         //Now then... Let's begin our A* Forward planning!
         var openSet = new PriorityQueue<(State state, PathNode path, double gCost, float fScore), float>();
         //We only needed defensive and silent fails before because we did not have a good heuristic function before.
         //We shouldn't have been suppressing initialisation errors before...
-        var initialHeuristic = StateComparison.CalculateStateComparisonHeuristic(initialState, goalState);
+        var initialHeuristic = StateComparison.CalculateStateComparisonHeuristic(initialState, goalState, implicitGoals);
         //The first state we have is a duplicate of the initial state for us to manipulate as needed.
         openSet.Enqueue((initialState.Clone(), null, 0.0, initialHeuristic), initialHeuristic);
 
@@ -301,7 +363,7 @@ public static class AdvancedGoalPlanner
                 if (!step.CanRun(currentState))
                     continue;
 
-                var successor = CreateSuccessorState(currentState, step, pathNode, gCost, goalState);
+                var successor = CreateSuccessorState(currentState, step, pathNode, gCost, goalState, implicitGoals);
                 openSet.Enqueue(successor, successor.fScore);
 
                 // Prune open set if needed
@@ -320,6 +382,7 @@ public static class AdvancedGoalPlanner
         config ??= DefaultConfig;
 
         var steps = GenerateStepsForState(initialState, goalState);
+        var implicitGoals = DeriveImplicitRequirements(initialState, goalState, steps);
 
         // Thread-safe collections for parallel processing
         var openSet = new PriorityQueue<(State state, PathNode path, double gCost, float fScore), float>();
@@ -327,7 +390,7 @@ public static class AdvancedGoalPlanner
         // Pre-size visited set to reduce resizing during search (typical search explores 100-1000 states)
         var visited = new ConcurrentDictionary<int, bool>(System.Environment.ProcessorCount, 512);
 
-        var initialHeuristic = StateComparison.CalculateStateComparisonHeuristic(initialState, goalState);
+        var initialHeuristic = StateComparison.CalculateStateComparisonHeuristic(initialState, goalState, implicitGoals);
         openSet.Enqueue((initialState.Clone(), null, 0.0, initialHeuristic), initialHeuristic);
 
         // Beam width - number of states to expand in parallel
@@ -415,7 +478,7 @@ public static class AdvancedGoalPlanner
 
                         Parallel.ForEach(validSteps, parallelOptions, step =>
                         {
-                            var successor = CreateSuccessorState(currentState, step, pathNode, gCost, goalState);
+                            var successor = CreateSuccessorState(currentState, step, pathNode, gCost, goalState, implicitGoals);
                             stepResults.Add(successor);
                         });
 
@@ -432,7 +495,7 @@ public static class AdvancedGoalPlanner
                         // Sequential for small number of steps
                         foreach (var step in validSteps)
                         {
-                            var successor = CreateSuccessorState(currentState, step, pathNode, gCost, goalState);
+                            var successor = CreateSuccessorState(currentState, step, pathNode, gCost, goalState, implicitGoals);
                             lock (openSetLock)
                             {
                                 openSet.Enqueue(successor, successor.fScore);

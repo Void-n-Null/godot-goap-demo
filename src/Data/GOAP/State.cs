@@ -134,6 +134,8 @@ public class State : IEnumerable<KeyValuePair<string, FactValue>>
     }
 
     public IEnumerable<KeyValuePair<string, FactValue>> Facts => EnumerateFacts();
+    
+    public IEnumerable<KeyValuePair<int, FactValue>> FactsById => EnumerateFactsId();
 
     public IEnumerator<KeyValuePair<string, FactValue>> GetEnumerator()
     {
@@ -153,6 +155,18 @@ public class State : IEnumerable<KeyValuePair<string, FactValue>>
             if (_mask.Get(id))
             {
                 yield return new KeyValuePair<string, FactValue>(FactRegistry.GetName(id), _facts[id]);
+            }
+        }
+    }
+
+    private IEnumerable<KeyValuePair<int, FactValue>> EnumerateFactsId()
+    {
+        int maxId = FactRegistry.Count;
+        for (int id = 0; id < _mask.Length && id < maxId; id++)
+        {
+            if (_mask.Get(id))
+            {
+                yield return new KeyValuePair<int, FactValue>(id, _facts[id]);
             }
         }
     }

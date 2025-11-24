@@ -200,7 +200,7 @@ public class AIGoalExecutor : IActiveComponent
                 _currentPlan = null;
             }
 
-            float planningTime = Time.GetTicksMsec() / 1000.0f;
+            float planningTime = GameManager.Instance.CachedTimeMsec / 1000.0f;
             bool shouldPlan = _forceReplan;
 
             if (!shouldPlan)
@@ -411,7 +411,7 @@ public class AIGoalExecutor : IActiveComponent
 
     private void BuildCurrentState(float currentTime)
     {
-        ulong startTicks = PROFILE_BUILD_STATE ? Time.GetTicksMsec() : 0UL;
+        ulong startTicks = PROFILE_BUILD_STATE ? GameManager.Instance.CachedTimeMsec : 0UL;
 
         _cachedState.Clear();
 
@@ -437,7 +437,7 @@ public class AIGoalExecutor : IActiveComponent
 
         if (PROFILE_BUILD_STATE)
         {
-            var elapsed = Time.GetTicksMsec() - startTicks;
+            var elapsed = GameManager.Instance.CachedTimeMsec - startTicks;
             LM.Debug($"[AIGoalExecutor] BuildCurrentState ({Entity.Name}) took {elapsed} ms");
         }
     }

@@ -32,6 +32,7 @@ public partial class GameManager : SingletonNode<GameManager>
     private double TickInterval => 1.0 / TickRatePerSecond;
     private double _smoothedFrameTime = 1.0 / 60.0;
     public double SmoothedFps { get; private set; } = 60.0;
+    public ulong CachedTimeMsec { get; private set; } = 0;
 
     // Scale Profiling System
     private ScaleProfiler _scaleProfiler;
@@ -189,6 +190,8 @@ public partial class GameManager : SingletonNode<GameManager>
     public override void _Process(double delta)
     {
         base._Process(delta);
+
+        CachedTimeMsec = Time.GetTicksMsec();
 
         FrameTime.Advance((float)delta);
 

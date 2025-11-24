@@ -1,63 +1,89 @@
-using Game.Data.Components;
-using Game.Data.GOAP;
 using System;
-using Godot;
+using System.Collections.Generic;
+using Game.Data.Components;
 
 namespace Game.Data.GOAP;
 
 public static class StateComparison
 {
-    public static float CalculateStateComparisonHeuristic(State currentState, State goalState)
+    public const float IMPLICIT_GOAL_WEIGHT = 0.75f;
+
+    public static float CalculateStateComparisonHeuristic(State currentState, State goalState, State implicitGoals = null)
     {
-        //We need to compare the current state to the goal state, and return a heuristic value.
-        float heuristic = 0f;
+        float h = 0f;
+        var processedKeys = new HashSet<int>();
 
-        //For each fact in the goal state, we need to compare it to the current state.
-        //Usually these goal states are pretty small, so doing this at scale should be fine... (I hope)
-        foreach (var goalFact in goalState.Facts)
+        // 1. Process explicit goals, merging any overlapping implicit requirements
+        foreach (var goalFact in goalState.FactsById)
         {
-            if (!currentState.TryGet(goalFact.Key, out var currentValue))
+            processedKeys.Add(goalFact.Key);
+
+            FactValue effectiveTarget = goalFact.Value;
+            if (implicitGoals != null && implicitGoals.TryGet(goalFact.Key, out var implicitVal))
             {
-                if (goalFact.Key.EndsWith("Count") && goalFact.Value.Type == FactType.Int)
-                {
-                    heuristic += goalFact.Value.IntValue;
-                }
-                else
-                {
-                    heuristic += 1f;
-                }
-                continue;
+                effectiveTarget = ResolveStricterRequirement(goalFact.Value, implicitVal);
             }
 
-            if (goalFact.Key.EndsWith("Count") && goalFact.Value.Type == FactType.Int && currentValue.Type == FactType.Int)
+            h += CalculateCost(currentState, goalFact.Key, effectiveTarget);
+        }
+
+        // 2. Process remaining implicit goals (weighted)
+        if (implicitGoals != null)
+        {
+            foreach (var implicitFact in implicitGoals.FactsById)
             {
-                heuristic += Math.Max(0, goalFact.Value.IntValue - currentValue.IntValue);
-            }
-            else if (!currentValue.Equals(goalFact.Value))
-            {
-                heuristic += 1f;
+                if (processedKeys.Contains(implicitFact.Key))
+                    continue;
+
+                float cost = CalculateCost(currentState, implicitFact.Key, implicitFact.Value);
+                h += cost * IMPLICIT_GOAL_WEIGHT;
             }
         }
 
-        // Special case: If goal is Near_Campfire but no campfire exists, add cost for gathering sticks
-        //Senior Dev: THIS IS AWFUL! WHY ARE WE HARDCODING THIS? WE NEED TO REFACTOR THIS!
-        //Me: I have no idea how to avoid hardcoding this yet. We might need to change how goals clarify their requirements a bit more...
-        if (goalState.TryGet(FactKeys.NearTarget(TargetType.Campfire), out var nearCampfire) && nearCampfire.BoolValue)
+        return h;
+    }
+
+    /// <summary>
+    /// Determines which requirement is stricter when explicit and implicit goals overlap.
+    /// </summary>
+    private static FactValue ResolveStricterRequirement(FactValue goalVal, FactValue implicitVal)
+    {
+        // Numeric requirements: take the higher magnitude
+        if (goalVal.Type == FactType.Int && implicitVal.Type == FactType.Int)
         {
-            bool hasCampfire = currentState.TryGet(FactKeys.WorldHas(TargetType.Campfire), out var hasCampfireValue) && hasCampfireValue.BoolValue;
-            if (!hasCampfire)
-            {
-                // Need to build campfire, which requires 16 sticks
-                const int STICKS_NEEDED = 16;
-                int currentSticks = currentState.TryGet(FactKeys.AgentCount(TargetType.Stick), out var sticksVal) ? sticksVal.IntValue : 0;
-                int sticksToGather = Math.Max(0, STICKS_NEEDED - currentSticks);
-                
-                // Each stick requires actions (goto tree, chop, pickup), estimate ~3 actions per 4 sticks
-                // Plus the build action
-                heuristic += sticksToGather * 0.75f + 1f;
-            }
+            return implicitVal.IntValue > goalVal.IntValue ? implicitVal : goalVal;
         }
 
-        return heuristic;
+        if (goalVal.Type == FactType.Float && implicitVal.Type == FactType.Float)
+        {
+            return implicitVal.FloatValue > goalVal.FloatValue ? implicitVal : goalVal;
+        }
+
+        // Booleans/enums: prefer the explicit goal (end state)
+        return goalVal;
+    }
+
+    private static float CalculateCost(State current, int key, FactValue targetVal)
+    {
+        if (current.TryGet(key, out var currentVal))
+        {
+            if (targetVal.Type == FactType.Int && currentVal.Type == FactType.Int)
+                return Math.Max(0, targetVal.IntValue - currentVal.IntValue);
+
+            if (targetVal.Type == FactType.Float && currentVal.Type == FactType.Float)
+                return Math.Max(0f, targetVal.FloatValue - currentVal.FloatValue);
+
+            // Boolean/enum mismatch counts as 1
+            return !currentVal.Equals(targetVal) ? 1f : 0f;
+        }
+
+        // Missing facts: assume zero for numerics, flat cost for others
+        if (targetVal.Type == FactType.Int)
+            return targetVal.IntValue;
+
+        if (targetVal.Type == FactType.Float)
+            return targetVal.FloatValue;
+
+        return 1f;
     }
 }

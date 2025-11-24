@@ -2,10 +2,9 @@ using Godot;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Game.Data;
-using Game.Data.Components;
 using Game.Data.UtilityAI;
 using Game.Utils;
+using Game.Universe;
 
 namespace Game.Data.Components;
 
@@ -46,7 +45,7 @@ public class UtilityGoalSelector : IActiveComponent
         string nameFirstWord = Entity.Name?.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] ?? "Entity";
         string idFirst6 = Entity.Id.ToString().Length >= 6 ? Entity.Id.ToString().Substring(0, 6) : Entity.Id.ToString();
         LM.Warning($"[{nameFirstWord} {idFirst6}] Executor couldn't find plan for '{goal.Name}', applying {PLAN_FAILURE_COOLDOWN}s cooldown");
-        _goalPlanFailureCooldowns[goal] = Time.GetTicksMsec() / 1000.0f + PLAN_FAILURE_COOLDOWN;
+        _goalPlanFailureCooldowns[goal] = GameManager.Instance.CachedTimeMsec / 1000.0f + PLAN_FAILURE_COOLDOWN;
         _currentGoal = null;
         EvaluateAndSelectGoal();
     }
@@ -59,7 +58,7 @@ public class UtilityGoalSelector : IActiveComponent
 
         // Always apply cooldown on execution failure to prevent jittery loops.
         // If it's truly urgent, they can try again after a short break.
-        _goalExecutionFailureCooldowns[goal] = Time.GetTicksMsec() / 1000.0f + EXECUTION_FAILURE_COOLDOWN;
+        _goalExecutionFailureCooldowns[goal] = GameManager.Instance.CachedTimeMsec / 1000.0f + EXECUTION_FAILURE_COOLDOWN;
 
         _currentGoal = null;
         EvaluateAndSelectGoal();
@@ -100,7 +99,7 @@ public class UtilityGoalSelector : IActiveComponent
 
     private bool IsGoalOnCooldown(IUtilityGoal goal)
     {
-        float currentTime = Time.GetTicksMsec() / 1000.0f;
+        float currentTime = GameManager.Instance.CachedTimeMsec / 1000.0f;
 
         // Check plan failure cooldown
         if (_goalPlanFailureCooldowns.TryGetValue(goal, out float planCooldownEnd))

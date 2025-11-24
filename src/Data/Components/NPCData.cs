@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using Game.Data;
 using Game.Data.Components;
 using Godot;
+using Game.Universe;
 
 namespace Game.Data;
 
@@ -95,9 +95,9 @@ public class NPCData : IActiveComponent
     public bool IsMale => Gender == NPCGender.Male;
     public bool IsFemale => Gender == NPCGender.Female;
 
-    public bool IsOnMateCooldown => Time.GetTicksMsec() / 1000.0 <= MateCooldownUntil;
+    public bool IsOnMateCooldown => GameManager.Instance.CachedTimeMsec / 1000.0 <= MateCooldownUntil;
     public double MateSearchCooldownUntil { get; private set; }
-    public bool IsOnMateSearchCooldown => Time.GetTicksMsec() / 1000.0 <= MateSearchCooldownUntil;
+    public bool IsOnMateSearchCooldown => GameManager.Instance.CachedTimeMsec / 1000.0 <= MateSearchCooldownUntil;
 
     public bool ShouldSeekMate => IsAdult && !IsOnMateCooldown && !IsOnMateSearchCooldown && !HasActiveMate && MatingDesire >= MatingDesireThreshold && IsMale;
     public bool HasActiveMate => ActiveMateTargetId != Guid.Empty;
@@ -106,13 +106,13 @@ public class NPCData : IActiveComponent
     public void ApplyMateCooldown()
     {
         MatingDesire = 0f;
-        MateCooldownUntil = Time.GetTicksMsec() / 1000.0 + MateCooldownSeconds;
+        MateCooldownUntil = GameManager.Instance.CachedTimeMsec / 1000.0 + MateCooldownSeconds;
         ClearActiveMate();
     }
 
     public void ApplyMateSearchCooldown(float seconds)
     {
-        MateSearchCooldownUntil = Time.GetTicksMsec() / 1000.0 + seconds;
+        MateSearchCooldownUntil = GameManager.Instance.CachedTimeMsec / 1000.0 + seconds;
     }
 
     public void ClearMateCooldown()

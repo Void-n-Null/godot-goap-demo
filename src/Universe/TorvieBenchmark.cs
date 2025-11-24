@@ -8,6 +8,7 @@ using Game.Data.Blueprints;
 using Game.Data.Components;
 using Game.Data.GOAP;
 using Game.Utils;
+using StdRandom = System.Random;
 
 namespace Game.Universe;
 
@@ -31,12 +32,13 @@ public partial class TorvieBenchmark : Node
 
 	private static readonly int[] EcsEntityTargets =
 	{
-		1_000, 5_000, 10_000, 20_000, 40_000, 60_000, 80_000, 100_000, 125_000, 150_000
+		1_000, 5_000, 10_000, 20_000, 40_000, 60_000, 80_000, 100_000, 125_000, 150_000,
+		175_000, 200_000, 225_000, 250_000
 	};
 
 	private static readonly int[] QuadTreeQueryBatches = { 500, 1_000, 2_000, 4_000 };
 
-private static readonly int[] ParallelAgentBatches = { 50, 100, 200, 500, 1_000 };
+	private static readonly int[] ParallelAgentBatches = { 50, 100, 200, 500, 1_000, 2_000, 3_000, 5_000 };
 
 	private static readonly StayWarmScenario[] StayWarmScenarios =
 	{
@@ -316,15 +318,21 @@ private static readonly int[] ParallelAgentBatches = { 50, 100, 200, 500, 1_000 
 
 		foreach (var agentBatch in ParallelAgentBatches)
 		{
+			var random = new StdRandom(1_337 + agentBatch);
+			var initialStates = new State[agentBatch];
+			for (int i = 0; i < agentBatch; i++)
+			{
+				initialStates[i] = CreateRandomizedStayWarmState(random, i);
+			}
+
 			long totalSteps = 0;
 			long completedPlans = 0;
 			long failedPlans = 0;
 			ulong startUsec = Time.GetTicksUsec();
 
-			Parallel.For(0, agentBatch, _ =>
+			Parallel.For(0, agentBatch, idx =>
 			{
-				var initial = CreateFullPipelineStayWarmState();
-				var plan = AdvancedGoalPlanner.ForwardPlan(initial, goalState);
+				var plan = AdvancedGoalPlanner.ForwardPlan(initialStates[idx], goalState);
 				if (plan != null)
 				{
 					Interlocked.Add(ref totalSteps, plan.Steps.Count);
@@ -374,6 +382,39 @@ private static readonly int[] ParallelAgentBatches = { 50, 100, 200, 500, 1_000 
 		var state = CreateBaseStayWarmState();
 		state.Set(FactKeys.WorldHas(TargetType.Tree), true);
 		state.Set(FactKeys.WorldCount(TargetType.Tree), 50);
+		return state;
+	}
+
+	private static State CreateRandomizedStayWarmState(StdRandom random, int agentId)
+	{
+		var state = CreateBaseStayWarmState();
+
+		// Randomize agent inventory and proximity.
+		bool agentHasStick = random.NextDouble() < 0.45;
+		int agentStickCount = agentHasStick ? random.Next(1, 5) : 0;
+		state.Set(FactKeys.AgentHas(TargetType.Stick), agentHasStick);
+		state.Set(FactKeys.AgentCount(TargetType.Stick), agentStickCount);
+		state.Set(FactKeys.NearTarget(TargetType.Stick), random.NextDouble() < 0.35);
+		state.Set(FactKeys.NearTarget(TargetType.Tree), random.NextDouble() < 0.35);
+
+		// Randomize world availability for primary resources.
+		bool worldHasSticks = random.NextDouble() < 0.8;
+		state.Set(FactKeys.WorldHas(TargetType.Stick), worldHasSticks);
+		state.Set(FactKeys.WorldCount(TargetType.Stick), worldHasSticks ? random.Next(2, 15) : 0);
+
+		bool worldHasTrees = random.NextDouble() < 0.95;
+		state.Set(FactKeys.WorldHas(TargetType.Tree), worldHasTrees);
+		state.Set(FactKeys.WorldCount(TargetType.Tree), worldHasTrees ? random.Next(10, 75) : 0);
+
+		bool worldHasCampfire = random.NextDouble() < 0.4;
+		state.Set(FactKeys.WorldHas(TargetType.Campfire), worldHasCampfire);
+		state.Set(FactKeys.WorldCount(TargetType.Campfire), worldHasCampfire ? random.Next(1, 4) : 0);
+		state.Set(FactKeys.NearTarget(TargetType.Campfire), worldHasCampfire && random.NextDouble() < 0.2);
+
+		// Inject per-agent identity to avoid clone states.
+		state.Set(FactKeys.AgentId, agentId);
+		state.Set(FactKeys.Position, random.Next(-10_000, 10_001));
+
 		return state;
 	}
 
