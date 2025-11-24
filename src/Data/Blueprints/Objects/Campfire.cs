@@ -11,6 +11,7 @@ public static class Campfire
         addTags: [ Tags.Campfire, Tags.HeatSource, Tags.Flammable ],
         addComponents: () => [
             new TargetComponent(TargetType.Campfire),
+            new CookingStationComponent(),
             new HealthComponent(maxHealth: 100), // Can be extinguished/destroyed
             new FireVisualComponent(
                 flameTexturePath: "res://textures/Flame.png",

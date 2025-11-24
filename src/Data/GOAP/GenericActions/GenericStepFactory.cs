@@ -52,9 +52,9 @@ public class GenericStepFactory : IStepFactory
         RegisterChopTreeStep();
         RegisterConsumeFoodStep();
         RegisterCraftingSteps();
+        RegisterCookingSteps();
         RegisterSleepInBedStep();
         RegisterIdleStep();
-        RegisterMateSteps();
     }
 
     private void RegisterSleepInBedStep()
@@ -130,54 +130,6 @@ public class GenericStepFactory : IStepFactory
             CostFactory = _ => 0.1f
         };
 
-        _stepConfigs.Add(config);
-    }
-
-    private void RegisterMateSteps()
-    {
-        var approach = new StepConfig("GoToMate")
-        {
-            ActionFactory = () => new MoveToMateAction(),
-            Preconditions = State.Empty(),
-            Effects = new List<(string, object)>
-            {
-                (FactKeys.NearMate, (FactValue)true)
-            },
-            CostFactory = _ => 5.0
-        };
-        _stepConfigs.Add(approach);
-
-        var matePre = State.Empty();
-        matePre.Set(FactKeys.NearMate, true);
-
-        var mate = new StepConfig("Mate")
-        {
-            ActionFactory = () => new MateAction(),
-            Preconditions = matePre,
-            Effects = new List<(string, object)>
-            {
-                (FactKeys.MateDesireSatisfied, (FactValue)true),
-                (FactKeys.NearMate, (FactValue)false)
-            },
-            CostFactory = _ => 1.0
-        };
-        _stepConfigs.Add(mate);
-
-        RegisterRespondToMateStep();
-    }
-
-    private void RegisterRespondToMateStep()
-    {
-        var config = new StepConfig("RespondToMate")
-        {
-            ActionFactory = () => new RespondToMateAction(),
-            Preconditions = State.Empty(), // Action checks validity
-            Effects = new List<(string, object)>
-            {
-                (FactKeys.MateRequestHandled, (FactValue)true)
-            },
-            CostFactory = _ => 1.0
-        };
         _stepConfigs.Add(config);
     }
 
@@ -293,44 +245,31 @@ public class GenericStepFactory : IStepFactory
 
     private void RegisterConsumeFoodStep()
     {
+        // Only allow consuming cooked food (Steak)
+        RegisterConsumeItemStep(TargetType.Steak, "EatSteak");
+    }
+
+    private void RegisterConsumeItemStep(TargetType type, string stepName)
+    {
         var pre = State.Empty();
-        pre.Set(FactKeys.NearTarget(TargetType.Food), true);
-        pre.Set(FactKeys.WorldHas(TargetType.Food), true);
+        // Removed NearTarget requirement because we carry it
+        pre.Set(FactKeys.AgentHas(type), true); 
         pre.Set("IsHungry", true);
 
         var effects = new List<(string, object)>
         {
             ("IsHungry", (FactValue)false),
-
-            (FactKeys.WorldCount(TargetType.Food), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(TargetType.Food), out var wObj))
-                    return Math.Max(0, wObj.IntValue - 1);
-                return 0;
-            })),
-
-            (FactKeys.WorldHas(TargetType.Food), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(TargetType.Food), out var wObj))
-                    return wObj.IntValue - 1 > 0;
-                return false;
-            })),
-
-            (FactKeys.NearTarget(TargetType.Food), (FactValue)false)
+            (FactKeys.AgentHas(type), (FactValue)false), // Consumed (assumes we only had 1 or we consume 1)
+            (FactKeys.AgentCount(type), (Func<State, FactValue>)(ctx => {
+                 if (ctx.TryGet(FactKeys.AgentCount(type), out var c))
+                     return Math.Max(0, c.IntValue - 1);
+                 return 0;
+            }))
         };
 
-        var config = new StepConfig("ConsumeFood")
+        var config = new StepConfig(stepName)
         {
-            ActionFactory = () => new TimedInteractionAction(
-                new EntityFinderConfig
-                {
-                    Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Food,
-                    SearchRadius = 128f,
-                    RequireReservation = false,
-                    ShouldReserve = true
-                },
-                interactionTime: 2.0f,
-                InteractionEffectConfig.ConsumeFood(),
-                actionName: "ConsumeFood"
-            ),
+            ActionFactory = () => new ConsumeInventoryItemAction(type),
             Preconditions = pre,
             Effects = effects,
             CostFactory = _ => 2.0
@@ -338,6 +277,58 @@ public class GenericStepFactory : IStepFactory
 
         _stepConfigs.Add(config);
     }
+    
+    private void RegisterCookingSteps()
+    {
+        // 1. Deposit Raw Beef
+        var depositPre = State.Empty();
+        depositPre.Set(FactKeys.NearTarget(TargetType.Campfire), true);
+        depositPre.Set(FactKeys.WorldHas(TargetType.Campfire), true);
+        depositPre.Set(FactKeys.AgentHas(TargetType.RawBeef), true);
+        // We assume campfire is free if we are going there to deposit. 
+        // Logic for finding free campfire is in the Action.
+        
+        var depositEffects = new List<(string, object)>
+        {
+            (FactKeys.AgentHas(TargetType.RawBeef), (FactValue)false),
+            (FactKeys.CampfireCooking(TargetType.RawBeef), (FactValue)true)
+        };
+        
+        _stepConfigs.Add(new StepConfig("DepositRawBeef")
+        {
+            ActionFactory = () => new DepositItemAction(TargetType.RawBeef, TargetType.Steak),
+            Preconditions = depositPre,
+            Effects = depositEffects,
+            CostFactory = _ => 1.0
+        });
+
+        // 2. Retrieve Steak
+        var retrievePre = State.Empty();
+        retrievePre.Set(FactKeys.NearTarget(TargetType.Campfire), true);
+        retrievePre.Set(FactKeys.CampfireCooking(TargetType.RawBeef), true); 
+        // We use "CampfireCooking(RawBeef)" as the state that enables retrieval of Steak.
+        // It implies "Input was RawBeef, output will be Steak".
+        
+        var retrieveEffects = new List<(string, object)>
+        {
+             (FactKeys.CampfireCooking(TargetType.RawBeef), (FactValue)false),
+             (FactKeys.AgentHas(TargetType.Steak), (FactValue)true),
+             (FactKeys.AgentCount(TargetType.Steak), (Func<State, FactValue>)(ctx => {
+                 if (ctx.TryGet(FactKeys.AgentCount(TargetType.Steak), out var c))
+                     return c.IntValue + 1;
+                 return 1;
+             }))
+        };
+        
+        _stepConfigs.Add(new StepConfig("RetrieveSteak")
+        {
+            ActionFactory = () => new RetrieveCookedItemAction(),
+            Preconditions = retrievePre,
+            Effects = retrieveEffects,
+            CostFactory = _ => 10.0 // Higher cost to represent waiting time
+        });
+    }
+
 
     private void RegisterCraftingSteps()
     {

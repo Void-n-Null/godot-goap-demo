@@ -63,7 +63,6 @@ public static class NPC
                 npc.Hunger = 0f;
                 npc.Thirst = 20f;
                 npc.Sleepiness = 50f;
-                npc.MatingDesire = Random.NextFloat(5f, 30f);
             })
         ]
     );

@@ -187,8 +187,6 @@ public class UtilityGoalSelector : IActiveComponent
         _availableGoals.Add(new EatFoodGoal());
         _availableGoals.Add(new StayWarmGoal());
         _availableGoals.Add(new SleepGoal());
-        _availableGoals.Add(new FindMateGoal());
-        _availableGoals.Add(new RespondToMateGoal());
         _availableGoals.Add(new IdleGoal());
 
         LM.Info($"[{Entity.Name}] UtilityAI started with {_availableGoals.Count} goals");

@@ -1,0 +1,17 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://dlwb3fyf5w4il"
+
+[deps]
+
+files=["res://torvie_benchmark_20251123_235457.ECS.translation", "res://torvie_benchmark_20251123_235457.ECS.translation", "res://torvie_benchmark_20251123_235457.ECS.translation"]
+
+source_file="res://torvie_benchmark_20251123_235457.csv"
+dest_files=["res://torvie_benchmark_20251123_235457.ECS.translation", "res://torvie_benchmark_20251123_235457.ECS.translation", "res://torvie_benchmark_20251123_235457.ECS.translation"]
+
+[params]
+
+compress=true
+delimiter=0

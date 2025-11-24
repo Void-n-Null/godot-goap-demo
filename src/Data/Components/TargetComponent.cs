@@ -9,6 +9,8 @@ public enum TargetType
     Stick,
     Wood,
     Food,
+    RawBeef,
+    Steak,
     Stone,
     Tree,  // For chopping
     Bed,   // For sleeping/resting

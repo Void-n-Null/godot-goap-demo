@@ -9,10 +9,10 @@ namespace Game.Utils;
 public static class LM
 {
 	private const bool LOGGING_ENABLED = true;
-	private const bool NON_ERROR_ENABLED = LOGGING_ENABLED && true;
+	private const bool NON_ERROR_ENABLED = LOGGING_ENABLED && false;
 	private const bool DEBUG_ENABLED = NON_ERROR_ENABLED && true;
 	private const bool INFO_ENABLED = NON_ERROR_ENABLED && true;
-	private const bool WARNING_ENABLED = NON_ERROR_ENABLED && true;
+	private const bool WARNING_ENABLED = NON_ERROR_ENABLED && false;
 	private const bool ERROR_ENABLED = LOGGING_ENABLED && true;
 
 	public static void Debug(string message)

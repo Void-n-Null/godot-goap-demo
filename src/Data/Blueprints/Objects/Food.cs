@@ -22,10 +22,10 @@ public static class Food
 			EntityBlueprint.Mutate<VisualComponent>((v) => v.PendingSpritePath = "res://textures/RawBeef.png"),
 			EntityBlueprint.Mutate<FoodData>((fd) => {
 				fd.CookedVariant = Steak;
-				fd.CookTime = 10f;
+				fd.CookTime = 5.0f; // Faster cook time for demo
 				fd.HungerRestoredOnConsumption = 10;
 			}),
-			EntityBlueprint.Mutate<TargetComponent>(tc => tc.Target = TargetType.Food)
+			EntityBlueprint.Mutate<TargetComponent>(tc => tc.Target = TargetType.RawBeef)
 		]
 	);
 
@@ -36,9 +36,9 @@ public static class Food
 			EntityBlueprint.Mutate<FoodData>((fd) => {
 				fd.RawVariant = RawBeef;
 				fd.IsCooked = true;
-				fd.HungerRestoredOnConsumption = 10;
+				fd.HungerRestoredOnConsumption = 30; // Better value
 			}),
-			EntityBlueprint.Mutate<TargetComponent>(tc => tc.Target = TargetType.Food)
+			EntityBlueprint.Mutate<TargetComponent>(tc => tc.Target = TargetType.Steak)
 		]
 	);
 

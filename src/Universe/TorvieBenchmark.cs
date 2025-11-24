@@ -38,7 +38,7 @@ public partial class TorvieBenchmark : Node
 
 	private static readonly int[] QuadTreeQueryBatches = { 500, 1_000, 2_000, 4_000 };
 
-	private static readonly int[] ParallelAgentBatches = { 50, 100, 200, 500, 1_000, 2_000, 3_000, 5_000 };
+	private static readonly int[] ParallelAgentBatches = { 50, 100, 200, 500, 1_000, 1_500, 2_000, 2_500, 3_000, 3_500, 4_000, 4_500, 5_000, 5_500, 6_000, 6_500, 7_000, 7_500, 8_000, 8_500, 9_000, 9_500, 10_000 };
 
 	private static readonly SleepScenario[] SleepScenarios =
 	{
@@ -267,8 +267,11 @@ public partial class TorvieBenchmark : Node
 		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 
 		var sleepGoal = BuildSleepGoalState();
+		var warmGoal = BuildStayWarmGoalState();
+		var eatGoal = BuildEatFoodGoalState();
+		
 		BenchmarkSleepScenarios(sleepGoal);
-		BenchmarkParallelSleep(sleepGoal);
+		BenchmarkParallelGoals(sleepGoal, warmGoal, eatGoal);
 	}
 
 	private void SpawnBenchmarkEntities(int count)
@@ -316,17 +319,30 @@ public partial class TorvieBenchmark : Node
 		}
 	}
 
-	private void BenchmarkParallelSleep(State goalState)
+	private void BenchmarkParallelGoals(State sleepGoal, State warmGoal, State eatGoal)
 	{
 		_results.Add("Section,Agents,TotalMs,MsPerPlan,AvgSteps,FailedPlans");
 
 		foreach (var agentBatch in ParallelAgentBatches)
 		{
 			var random = new StdRandom(1_337 + agentBatch);
-			var initialStates = new State[agentBatch];
+			var scenarios = new (State Initial, State Goal)[agentBatch];
+			
 			for (int i = 0; i < agentBatch; i++)
 			{
-				initialStates[i] = CreateRandomizedSleepState(random, i);
+				double r = random.NextDouble();
+				if (r < 0.33)
+				{
+					scenarios[i] = (CreateRandomizedSleepState(random, i), sleepGoal);
+				}
+				else if (r < 0.66)
+				{
+					scenarios[i] = (CreateRandomizedStayWarmState(random, i), warmGoal);
+				}
+				else
+				{
+					scenarios[i] = (CreateRandomizedEatFoodState(random, i), eatGoal);
+				}
 			}
 
 			long totalSteps = 0;
@@ -336,7 +352,8 @@ public partial class TorvieBenchmark : Node
 
 			Parallel.For(0, agentBatch, idx =>
 			{
-				var plan = AdvancedGoalPlanner.ForwardPlan(initialStates[idx], goalState);
+				var (initial, goal) = scenarios[idx];
+				var plan = AdvancedGoalPlanner.ForwardPlan(initial, goal);
 				if (plan != null)
 				{
 					Interlocked.Add(ref totalSteps, plan.Steps.Count);
@@ -364,6 +381,20 @@ public partial class TorvieBenchmark : Node
 		return goal;
 	}
 
+	private static State BuildStayWarmGoalState()
+	{
+		var goal = new State();
+		goal.Set(FactKeys.NearTarget(TargetType.Campfire), true);
+		return goal;
+	}
+
+	private static State BuildEatFoodGoalState()
+	{
+		var goal = new State();
+		goal.Set("IsHungry", false);
+		return goal;
+	}
+
 	private static State CreateBaseSleepState()
 	{
 		var state = new State();
@@ -379,6 +410,35 @@ public partial class TorvieBenchmark : Node
 		state.Set(FactKeys.WorldCount(TargetType.Tree), 0);
 		state.Set(FactKeys.NearTarget(TargetType.Tree), false);
 		state.Set(FactKeys.NearTarget(TargetType.Stick), false);
+		return state;
+	}
+
+	private static State CreateBaseStayWarmState()
+	{
+		var state = new State();
+		state.Set(FactKeys.NearTarget(TargetType.Campfire), false);
+		state.Set(FactKeys.WorldHas(TargetType.Campfire), false);
+		state.Set(FactKeys.WorldCount(TargetType.Campfire), 0);
+		
+		// Campfire needs 2 sticks.
+		state.Set(FactKeys.AgentHas(TargetType.Stick), false);
+		state.Set(FactKeys.AgentCount(TargetType.Stick), 0);
+		state.Set(FactKeys.WorldHas(TargetType.Stick), false);
+		state.Set(FactKeys.WorldCount(TargetType.Stick), 0);
+		state.Set(FactKeys.WorldHas(TargetType.Tree), false);
+		state.Set(FactKeys.WorldCount(TargetType.Tree), 0);
+		state.Set(FactKeys.NearTarget(TargetType.Tree), false);
+		state.Set(FactKeys.NearTarget(TargetType.Stick), false);
+		return state;
+	}
+
+	private static State CreateBaseEatFoodState()
+	{
+		var state = new State();
+		state.Set("IsHungry", true);
+		state.Set(FactKeys.NearTarget(TargetType.Food), false);
+		state.Set(FactKeys.WorldHas(TargetType.Food), false);
+		state.Set(FactKeys.WorldCount(TargetType.Food), 0);
 		return state;
 	}
 
@@ -411,6 +471,53 @@ public partial class TorvieBenchmark : Node
 		state.Set(FactKeys.NearTarget(TargetType.Bed), worldHasBed && random.NextDouble() < 0.2);
 
 		// Inject per-agent identity to avoid clone states.
+		state.Set(FactKeys.AgentId, agentId);
+		state.Set(FactKeys.Position, random.Next(-10_000, 10_001));
+
+		return state;
+	}
+
+	private static State CreateRandomizedStayWarmState(StdRandom random, int agentId)
+	{
+		var state = CreateBaseStayWarmState();
+
+		// Similar stick distribution as sleep, but campfire needs fewer (2).
+		bool agentHasStick = random.NextDouble() < 0.45;
+		int agentStickCount = agentHasStick ? random.Next(1, 4) : 0;
+		state.Set(FactKeys.AgentHas(TargetType.Stick), agentHasStick);
+		state.Set(FactKeys.AgentCount(TargetType.Stick), agentStickCount);
+		state.Set(FactKeys.NearTarget(TargetType.Stick), random.NextDouble() < 0.35);
+		state.Set(FactKeys.NearTarget(TargetType.Tree), random.NextDouble() < 0.35);
+
+		bool worldHasSticks = random.NextDouble() < 0.85;
+		state.Set(FactKeys.WorldHas(TargetType.Stick), worldHasSticks);
+		state.Set(FactKeys.WorldCount(TargetType.Stick), worldHasSticks ? random.Next(2, 15) : 0);
+
+		bool worldHasTrees = random.NextDouble() < 0.99;
+		state.Set(FactKeys.WorldHas(TargetType.Tree), worldHasTrees);
+		state.Set(FactKeys.WorldCount(TargetType.Tree), worldHasTrees ? random.Next(10, 50) : 0);
+
+		bool worldHasCampfire = random.NextDouble() < 0.3;
+		state.Set(FactKeys.WorldHas(TargetType.Campfire), worldHasCampfire);
+		state.Set(FactKeys.WorldCount(TargetType.Campfire), worldHasCampfire ? random.Next(1, 3) : 0);
+		state.Set(FactKeys.NearTarget(TargetType.Campfire), worldHasCampfire && random.NextDouble() < 0.2);
+
+		state.Set(FactKeys.AgentId, agentId);
+		state.Set(FactKeys.Position, random.Next(-10_000, 10_001));
+
+		return state;
+	}
+
+	private static State CreateRandomizedEatFoodState(StdRandom random, int agentId)
+	{
+		var state = CreateBaseEatFoodState();
+
+		// Food availability
+		bool worldHasFood = random.NextDouble() < 0.90; // Food is fairly common for this test
+		state.Set(FactKeys.WorldHas(TargetType.Food), worldHasFood);
+		state.Set(FactKeys.WorldCount(TargetType.Food), worldHasFood ? random.Next(1, 10) : 0);
+		state.Set(FactKeys.NearTarget(TargetType.Food), worldHasFood && random.NextDouble() < 0.4);
+
 		state.Set(FactKeys.AgentId, agentId);
 		state.Set(FactKeys.Position, random.Next(-10_000, 10_001));
 
