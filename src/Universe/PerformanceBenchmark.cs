@@ -16,7 +16,7 @@ namespace Game.Universe;
 /// Purpose-built benchmarking harness for producing headline graphs (ECS throughput,
 /// QuadTree allocation profile, GOAP planning latency). Press 'B' in-game to run.
 /// </summary>
-public partial class TorvieBenchmark : Node
+public partial class PerformanceBenchmark : Node
 {
 	private readonly struct SleepScenario
 	{
@@ -82,7 +82,7 @@ public partial class TorvieBenchmark : Node
 
 	public override void _Ready()
 	{
-		GD.Print("[TorvieBenchmark] Ready. Press 'B' to run architectural benchmarks.");
+		GD.Print("[PerformanceBenchmark] Ready. Press 'B' to run architectural benchmarks.");
 	}
 
 	public override void _Input(InputEvent @event)
@@ -97,13 +97,13 @@ public partial class TorvieBenchmark : Node
 	{
 		if (_state != BenchmarkState.Idle)
 		{
-			GD.Print("[TorvieBenchmark] Benchmark already running or completed.");
+			GD.Print("[PerformanceBenchmark] Benchmark already running or completed.");
 			return;
 		}
 
 		if (!EntityManager.HasInstance)
 		{
-			GD.PrintErr("[TorvieBenchmark] EntityManager is not ready. Cannot run benchmarks.");
+			GD.PrintErr("[PerformanceBenchmark] EntityManager is not ready. Cannot run benchmarks.");
 			return;
 		}
 
@@ -111,7 +111,7 @@ public partial class TorvieBenchmark : Node
 		_results.Clear();
 		_benchmarkEntities.Clear();
 
-		GD.Print("\n[ Torvie ] === STARTING ARCHITECTURAL BENCHMARK SUITE ===");
+		GD.Print("\n[ Benchmark ] === STARTING ARCHITECTURAL BENCHMARK SUITE ===");
 
 		await CleanupWorld();
 		await RunEcsThroughputTest();
@@ -119,7 +119,7 @@ public partial class TorvieBenchmark : Node
 		await RunGoapPlannerTest();
 		ExportResults();
 
-		GD.Print("[ Torvie ] === BENCHMARK COMPLETE ===");
+		GD.Print("[ Benchmark ] === BENCHMARK COMPLETE ===");
 		_state = BenchmarkState.Complete;
 	}
 
@@ -128,7 +128,7 @@ public partial class TorvieBenchmark : Node
 		var manager = EntityManager.Instance;
 
 		var existing = new List<IUpdatableEntity>(manager.GetEntities());
-		GD.Print($"[TorvieBenchmark] Clearing {existing.Count} existing entities.");
+		GD.Print($"[PerformanceBenchmark] Clearing {existing.Count} existing entities.");
 
 		foreach (var entity in existing)
 		{
@@ -291,16 +291,16 @@ public partial class TorvieBenchmark : Node
 	private void ExportResults()
 	{
 		string projectPath = ProjectSettings.GlobalizePath("res://");
-		string filePath = System.IO.Path.Combine(projectPath, $"torvie_benchmark_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+		string filePath = System.IO.Path.Combine(projectPath, $"performance_benchmark_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
 
 		try
 		{
 			System.IO.File.WriteAllLines(filePath, _results);
-			GD.Print($"[TorvieBenchmark] Results written to {filePath}");
+			GD.Print($"[PerformanceBenchmark] Results written to {filePath}");
 		}
 		catch (Exception ex)
 		{
-			GD.PrintErr($"[TorvieBenchmark] Failed to export CSV: {ex.Message}");
+			GD.PrintErr($"[PerformanceBenchmark] Failed to export CSV: {ex.Message}");
 		}
 	}
 
@@ -532,3 +532,4 @@ public partial class TorvieBenchmark : Node
 		return plan;
 	}
 }
+

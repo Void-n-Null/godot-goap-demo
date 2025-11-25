@@ -5,3 +5,4 @@
 # Ignore any previous corrupt git dirs
 
 .git_corrupt*
+*.csv*

@@ -8,7 +8,7 @@
 [ext_resource type="Script" uid="uid://bohyud214g6jn" path="res://src/Utils/NPCSelectionManager.cs" id="6_selection_manager"]
 [ext_resource type="Script" uid="uid://b7ff6ej6ohdji" path="res://src/Utils/NPCSelectionVisualizer.cs" id="7_selection_visualizer"]
 [ext_resource type="Script" uid="uid://cq7yd8nkp3mno" path="res://src/Utils/ScenarioSelectorPanel.cs" id="8_scenario_selector"]
-[ext_resource type="Script" uid="uid://b3lhitap0dkj4" path="res://src/Universe/TorvieBenchmark.cs" id="9_85g3d"]
+[ext_resource type="Script" uid="uid://b3lhitap0dkj4" path="res://src/Universe/PerformanceBenchmark.cs" id="9_85g3d"]
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_0wfyh")

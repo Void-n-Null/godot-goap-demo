@@ -2,16 +2,17 @@
 
 This project is a high-performance technical demonstration of Goal-Oriented Action Planning (GOAP)  integrated with a custom Entity Component System (ECS) in Godot 4.5 Mono with C#. It is designed to see how complex AI systems and massive entity counts can scale in a real-time survival-style environment.
 
+![Many agents demo](many_people_demo.png)
+*500+ AI planning agents planning, chopping trees, crafting campfires, cooking food, and building beds.*
+
 ## What's Inside?
 
 *   **High-Throughput GOAP Planner:** An advanced A* planner that can generate over 60,000 action plans per second, running in parallel across available CPU cores.
-*   **Custom ECS Architecture:** A lightweight, data-oriented ECS implementation capable of updating 250,000+ simple entities and 50,000+ complex entities while keeping frame times manageable.
+*   **Custom ECS Architecture:** A lightweight, data-oriented ECS implementation capable of updating 150,000+ simple entities while keeping frame times manageable.
 *   **Spatial Partitioning:** A custom QuadTree implementation optimized for fast spatial queries and resource lookups.
 *   **Benchmarking Tools:** Built-in harnesses to stress-test the system and visualize performance metrics (press `B` in-game).
 
 ## Performance
-
-I built this system to run fast. Below are the results from my latest benchmarking run, showing how the architecture handles load.
 
 ### Hardware Context
 These benchmarks were recorded on the following machine:
@@ -26,7 +27,7 @@ The ECS logic update loop is decoupled from rendering, allowing the simulation t
 ![ECS Performance Graph](ECS_Perf_Graph.png)
 
 ### GOAP AI Throughput
-The AI planner scales linearly with the number of concurrent agents. In our tests, the system achieved a throughput of approximately **62,000 agents per second**, with an average planning cost of just **0.045ms** per plan.
+The AI planner scales linearly with the number of concurrent agents. In my tests, the system achieved a throughput of approximately **62,000 agents per second**, with an average planning cost of just **0.045ms** per plan.
 
 ![GOAP Performance Graph](GOAP_Perf_Graph.png)
 
@@ -38,7 +39,7 @@ The AI planner scales linearly with the number of concurrent agents. In our test
 4.  Press `B` at any time to run the benchmark suite yourself.
 
 ## Where to find Benchmark Results
-If you run the benchmarks yourself, you'll see in the root of the godot project there will be a file called `torvie_benchmark_(date)_(time).csv` which will contain all the data retrieved during the benchmark
+If you run the benchmarks yourself, you'll see in the root of the godot project there will be a file called `performance_benchmark_*.csv` which will contain all the data retrieved during the benchmark
 
 ## Visual Examples
 
@@ -46,8 +47,6 @@ If you run the benchmarks yourself, you'll see in the root of the godot project 
 ![4K Screenshot](4K_Screenshot_Demo.png)
 The agent in the screenshot is executing a plan to satisfy its hunger goal
 
-### Complex scenario with over 500 agents. Agents have chopped down trees and used the sticks to create campfires and beds. 
-![Many people Screenshot](many_people_demo.png)
 
 
 ## Development Methodology
