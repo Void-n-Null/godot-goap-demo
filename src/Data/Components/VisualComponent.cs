@@ -44,7 +44,7 @@ public class VisualComponent(string ScenePath = null) : IComponent
 		var texture = Resources.GetTexture(path);
 		if (texture == null) return;
 		if (_id != 0UL)
-			CustomEntityRenderEngineLocator.Renderer?.UpdateSpriteTexture(_id, texture);
+			EntityRendererFinder.Renderer?.UpdateSpriteTexture(_id, texture);
 		// Maintain legacy Sprite node field for external code; but no node is created.
 	}
 
@@ -52,7 +52,7 @@ public class VisualComponent(string ScenePath = null) : IComponent
 	{
 		if (texture == null) return;
 		if (_id != 0UL)
-			CustomEntityRenderEngineLocator.Renderer?.UpdateSpriteTexture(_id, texture);
+			EntityRendererFinder.Renderer?.UpdateSpriteTexture(_id, texture);
 	}
 
 	private void PushTransform()
@@ -60,11 +60,11 @@ public class VisualComponent(string ScenePath = null) : IComponent
 		if (_id == 0UL || _transform2D == null) return;
 		var scale = _transform2D.Scale * (ScaleMultiplier ?? Vector2.One);
 		var visualPosition = _transform2D.Position + VisualOriginOffset;
-		CustomEntityRenderEngineLocator.Renderer?.UpdateSprite(_id, visualPosition, _transform2D.Rotation, scale);
+		EntityRendererFinder.Renderer?.UpdateSprite(_id, visualPosition, _transform2D.Rotation, scale);
 		
 		// Update ZBias if overridden (VisualOriginOffset no longer affects Z sorting automatically)
 		float zBias = ZBiasOverride ?? 0f;
-		CustomEntityRenderEngineLocator.Renderer?.UpdateSpriteZBias(_id, zBias);
+		EntityRendererFinder.Renderer?.UpdateSpriteZBias(_id, zBias);
 		
 		_transform2D.ClearDirty(TransformDirtyFlags.All);
 	}
@@ -103,7 +103,7 @@ public class VisualComponent(string ScenePath = null) : IComponent
 		// Only add sprite if we have a valid texture
 		if (texture != null)
 		{
-			_id = CustomEntityRenderEngineLocator.Renderer?.AddSprite(texture, visualPosition, _transform2D.Rotation, scale, null, zBias) ?? 0UL;
+			_id = EntityRendererFinder.Renderer?.AddSprite(texture, visualPosition, _transform2D.Rotation, scale, null, zBias) ?? 0UL;
 		}
 		else
 		{
@@ -125,7 +125,7 @@ public class VisualComponent(string ScenePath = null) : IComponent
 	{
 		if (_id != 0UL)
 		{
-			CustomEntityRenderEngineLocator.Renderer?.RemoveSprite(_id);
+			EntityRendererFinder.Renderer?.RemoveSprite(_id);
 			_id = 0UL;
 		}
 		UnsubscribeFromTransform();
@@ -168,7 +168,7 @@ public class VisualComponent(string ScenePath = null) : IComponent
 		if (_id == 0UL || !_overlayDirty)
 			return;
 
-		var renderer = CustomEntityRenderEngineLocator.Renderer;
+		var renderer = EntityRendererFinder.Renderer;
 		if (renderer == null)
 			return;
 

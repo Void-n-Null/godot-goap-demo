@@ -8,6 +8,16 @@ using Game.Utils;
 
 namespace Game.Data.GOAP;
 
+public enum PlanTickResult
+{
+	/// <summary>Plan is still executing</summary>
+	Running,
+	/// <summary>Plan completed successfully</summary>
+	Succeeded,
+	/// <summary>Plan failed during execution</summary>
+	Failed
+}
+
 public sealed class Plan
 {
 	private readonly List<Step> _steps;
@@ -19,6 +29,18 @@ public sealed class Plan
 	public State CurrentState => _currentState;
 	public bool IsComplete { get; private set; }
 	public bool Succeeded { get; private set; }
+	
+	/// <summary>
+	/// Gets the current result status of the plan
+	/// </summary>
+	public PlanTickResult Result
+	{
+		get
+		{
+			if (!IsComplete) return PlanTickResult.Running;
+			return Succeeded ? PlanTickResult.Succeeded : PlanTickResult.Failed;
+		}
+	}
 
 	public Plan(IEnumerable<Step> steps, State initialState)
 	{
@@ -28,9 +50,9 @@ public sealed class Plan
 		Succeeded = IsComplete;
 	}
 
-public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null)
+public PlanTickResult Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null)
 	{
-		if (IsComplete) return true;
+			if (IsComplete) return Result;
 
 	if (goalSatisfied != null && goalSatisfied(agent))
 	{
@@ -42,7 +64,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 			_currentAction.Exit(agent, ActionExitReason.Completed);
 			_currentAction = null;
 		}
-		return true;
+		return PlanTickResult.Succeeded;
 	}
 
 		if (_currentAction is IRuntimeGuard guard && !guard.StillValid(agent))
@@ -52,7 +74,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 			_currentAction = null;
 			IsComplete = true;
 			Succeeded = false;
-			return true;
+			return PlanTickResult.Failed;
 		}
 
 		if (_currentAction == null || _currentStepIndex < 0)
@@ -62,7 +84,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 			{
 				IsComplete = true;
 				Succeeded = true;
-				return true;
+				return PlanTickResult.Succeeded;
 			}
 
 			var step = _steps[_currentStepIndex];
@@ -74,7 +96,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 
 		var status = _currentAction.Update(agent, dt);
 		
-		if (status == ActionStatus.Running) return false;
+		if (status == ActionStatus.Running) return PlanTickResult.Running;
 
 		var reason = status == ActionStatus.Succeeded ? ActionExitReason.Completed : ActionExitReason.Failed;
 		_currentAction.Exit(agent, reason);
@@ -100,11 +122,12 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 				{
 					try 
 					{ 
-						// Slow fallback for legacy types
-						finalValue = (FactValue)(dynamic)val; 
+						// Fallback conversion using static method (no dynamic overhead)
+						finalValue = FactValue.From(val); 
 					} 
 					catch 
 					{ 
+						// Skip invalid effect values
 						continue; 
 					}
 				}
@@ -116,7 +139,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 			LM.Error($"Plan step {_currentStepIndex} failed - check action Fail logs for reason");
 			IsComplete = true;
 			Succeeded = false;
-			return true;
+			return PlanTickResult.Failed;
 		}
 
 		_currentAction = null;
@@ -127,7 +150,7 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 		LM.Info("Plan goal satisfied after step completion, ending plan.");
 		IsComplete = true;
 		Succeeded = true;
-		return true;
+		return PlanTickResult.Succeeded;
 	}
 
 	if (_currentStepIndex >= _steps.Count - 1)
@@ -140,10 +163,10 @@ public bool Tick(Entity agent, float dt, Func<Entity, bool> goalSatisfied = null
 		}
 		IsComplete = true;
 		Succeeded = true;
-		return true;
+		return PlanTickResult.Succeeded;
 	}
 
-	return false;
+		return PlanTickResult.Running;
 	}
 
 	public void Cancel(Entity agent)

@@ -287,6 +287,21 @@ public sealed class EntityQuadTree
 
     // ---------------- QUERIES ----------------
 
+    /// <summary>
+    /// Queries the tree for all entities within a circular region.
+    /// WARNING: This method returns a SHARED BUFFER that is reused across all queries.
+    /// The returned list is cleared and repopulated on every call to any Query method.
+    /// DO NOT store the returned reference - copy the results if you need to keep them.
+    /// DO NOT call this method from multiple threads or nested queries simultaneously.
+    /// </summary>
+    /// <example>
+    /// // WRONG: Storing the reference
+    /// var results = quadTree.QueryCircle(pos, radius);
+    /// // ... later use results (will be corrupted by other queries)
+    ///
+    /// // CORRECT: Copy the results immediately
+    /// var results = new List&lt;Entity&gt;(quadTree.QueryCircle(pos, radius));
+    /// </example>
     public List<Entity> QueryCircle(Vector2 center, float radius, Func<Entity, bool> predicate = null, int maxResults = int.MaxValue)
     {
         _reusableResults.Clear();
@@ -447,6 +462,21 @@ public sealed class EntityQuadTree
         return _reusableResults;
     }
 
+    /// <summary>
+    /// Queries the tree for all entities within a rectangular region.
+    /// WARNING: This method returns a SHARED BUFFER that is reused across all queries.
+    /// The returned list is cleared and repopulated on every call to any Query method.
+    /// DO NOT store the returned reference - copy the results if you need to keep them.
+    /// DO NOT call this method from multiple threads or nested queries simultaneously.
+    /// </summary>
+    /// <example>
+    /// // WRONG: Storing the reference
+    /// var results = quadTree.QueryRectangle(rect);
+    /// // ... later use results (will be corrupted by other queries)
+    ///
+    /// // CORRECT: Copy the results immediately
+    /// var results = new List&lt;Entity&gt;(quadTree.QueryRectangle(rect));
+    /// </example>
     public List<Entity> QueryRectangle(Rect2 area, Func<Entity, bool> predicate = null, int maxResults = int.MaxValue)
     {
         _reusableResults.Clear();
@@ -494,9 +524,14 @@ public sealed class EntityQuadTree
         return _reusableResults;
     }
 
-    public Entity FindNearest(Vector2 center, float maxRadius, Func<Entity, bool> predicate = null)
+    /// <summary>
+    /// Find the nearest entity within a maximum search radius.
+    /// NOTE: This method uses the same shared buffer as QueryCircle/QueryRectangle internally.
+    /// However, it returns a single Entity, so the buffer reuse is not a concern for callers.
+    /// </summary>
+    public Entity FindNearest(Vector2 position, float maxRadius, Func<Entity, bool> predicate = null)
     {
-        return FindNearestWithCounts(center, maxRadius, predicate, out _);
+        return FindNearestWithCounts(position, maxRadius, predicate, out _);
     }
 
     public Entity FindNearestWithCounts(Vector2 center, float maxRadius, Func<Entity, bool> predicate, out int testedCount)

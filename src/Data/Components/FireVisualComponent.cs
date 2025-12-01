@@ -74,26 +74,26 @@ public class FireVisualComponent(
         _time += (float)delta;
 
         // Update flame sprite transform with flicker
-        if (_flameSpriteId != 0UL && _transform2D != null && CustomEntityRenderEngineLocator.Renderer != null)
+        if (_flameSpriteId != 0UL && _transform2D != null && EntityRendererFinder.Renderer != null)
         {
             // Flicker scale between 0.9 and 1.1
             var flicker = 1.0f + 0.1f * Mathf.Sin(_time * 18.0f);
             var scale = _transform2D.Scale * (flicker * Intensity) * ScaleMultiplier;
             var position = _transform2D.Position + VisualOffset;
-            CustomEntityRenderEngineLocator.Renderer.UpdateSprite(_flameSpriteId, position, _transform2D.Rotation, scale);
+            EntityRendererFinder.Renderer.UpdateSprite(_flameSpriteId, position, _transform2D.Rotation, scale);
 
             // Alpha pulse for warmth
             var alpha = 0.75f + 0.2f * Mathf.Sin(_time * 12.0f + 1.57f);
             var tinted = new Color(FlameTint.R, FlameTint.G, FlameTint.B, alpha * Intensity);
-            CustomEntityRenderEngineLocator.Renderer.UpdateSpriteModulate(_flameSpriteId, tinted);
+            EntityRendererFinder.Renderer.UpdateSpriteModulate(_flameSpriteId, tinted);
         }
-        else if (_transform2D != null && CustomEntityRenderEngineLocator.Renderer != null)
+        else if (_transform2D != null && EntityRendererFinder.Renderer != null)
         {
             // Fallback: debug circle if no texture available
             var r = 8f + 2f * Mathf.Sin(_time * 15.0f);
             var position = _transform2D.Position + VisualOffset;
             // Use X scale for primary size
-            CustomEntityRenderEngineLocator.Renderer.QueueDebugCircle(
+            EntityRendererFinder.Renderer.QueueDebugCircle(
                 position,
                 r * Intensity * ScaleMultiplier.X,
                 new Color(1f, 0.4f, 0.1f, 0.85f * Intensity),
@@ -134,7 +134,7 @@ public class FireVisualComponent(
     private void TryCreateFlameOverlay()
     {
         if (_flameSpriteId != 0UL) return;
-        if (_transform2D == null || CustomEntityRenderEngineLocator.Renderer == null) return;
+        if (_transform2D == null || EntityRendererFinder.Renderer == null) return;
 
         // Load flame texture
         if (!string.IsNullOrEmpty(FlameTexturePath))
@@ -145,7 +145,7 @@ public class FireVisualComponent(
         if (_flameTexture != null)
         {
             var position = _transform2D.Position + VisualOffset;
-            _flameSpriteId = CustomEntityRenderEngineLocator.Renderer.AddSprite(
+            _flameSpriteId = EntityRendererFinder.Renderer.AddSprite(
                 _flameTexture,
                 position,
                 _transform2D.Rotation,
@@ -158,9 +158,9 @@ public class FireVisualComponent(
 
     private void RemoveFlameOverlay()
     {
-        if (_flameSpriteId != 0UL && CustomEntityRenderEngineLocator.Renderer != null)
+        if (_flameSpriteId != 0UL && EntityRendererFinder.Renderer != null)
         {
-            CustomEntityRenderEngineLocator.Renderer.RemoveSprite(_flameSpriteId);
+            EntityRendererFinder.Renderer.RemoveSprite(_flameSpriteId);
         }
         _flameSpriteId = 0UL;
         _flameTexture = null;

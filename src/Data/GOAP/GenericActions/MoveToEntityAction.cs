@@ -138,8 +138,42 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
 
         return EvaluateGuardPeriodically(agent, () =>
         {
+            // If current target is gone, try to find a new one instead of failing
             if (_targetEntity == null || !_targetEntity.IsActive)
+            {
+                var newTarget = FindNearestTarget(agent);
+                if (newTarget != null)
+                {
+                    // Release old reservation if we had one
+                    if (_targetEntity != null && _finderConfig.ShouldReserve)
+                    {
+                        ResourceReservationManager.Instance.Release(_targetEntity, agent);
+                    }
+                    
+                    // Switch to new target
+                    _targetEntity = newTarget;
+                    
+                    // Reserve new target
+                    if (_finderConfig.ShouldReserve && !ResourceReservationManager.Instance.TryReserve(_targetEntity, agent))
+                    {
+                        LM.Warning($"[{agent.Name}] {_actionName}: Found new target but couldn't reserve it");
+                        return false;
+                    }
+                    
+                    // Update motor destination
+                    if (_motor != null)
+                    {
+                        _motor.Target = _targetEntity.Transform.Position;
+                    }
+                    
+                    LM.Info($"[{agent.Name}] {_actionName}: Original target gone, switching to {_targetEntity.Name}");
+                    return true;
+                }
+                
+                // No alternative target found - now we can fail
+                LM.Warning($"[{agent.Name}] {_actionName}: Target gone and no alternatives found");
                 return false;
+            }
 
             bool valid = true;
 

@@ -60,7 +60,7 @@ public class WanderBehavior(float radius = 100f) : IActiveComponent
     {
         if (_motor == null || _transform == null) return;
         if (!(_motor.DebugDrawEnabled)) return;
-        if (Utils.CustomEntityRenderEngineLocator.Renderer == null) return;
+        if (Utils.EntityRendererFinder.Renderer == null) return;
 
 
         // Visualize target circle and line to center when target exists
@@ -69,8 +69,8 @@ public class WanderBehavior(float radius = 100f) : IActiveComponent
         {
             var center = target.Value;
             var radius = _motor.TargetReachedRadius;
-            Utils.CustomEntityRenderEngineLocator.Renderer.QueueDebugCircle(center, radius, Colors.LimeGreen, 1.5f, 36);
-            Utils.CustomEntityRenderEngineLocator.Renderer.QueueDebugLine(_transform.Position, center, Colors.Cyan, 1.5f);
+            Utils.EntityRendererFinder.Renderer.QueueDebugCircle(center, radius, Colors.LimeGreen, 1.5f, 36);
+            Utils.EntityRendererFinder.Renderer.QueueDebugLine(_transform.Position, center, Colors.Cyan, 1.5f);
         }
     }
 

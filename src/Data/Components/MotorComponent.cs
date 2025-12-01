@@ -67,14 +67,14 @@ public class MotorComponent(
         _transform2D.Position += Velocity * (float)delta;
 
         // 5) Optional debug draw for velocity (yellow) and acceleration (blue)
-        if (DebugDrawEnabled && Utils.CustomEntityRenderEngineLocator.Renderer != null)
+        if (DebugDrawEnabled && Utils.EntityRendererFinder.Renderer != null)
         {
             var origin = _transform2D.Position;
             var velVec = Velocity * DebugVectorScale;
             var accVec = Acceleration * DebugVectorScale;
-            Utils.CustomEntityRenderEngineLocator.Renderer.QueueDebugVector(origin, velVec, Colors.Yellow, 2f);
+            Utils.EntityRendererFinder.Renderer.QueueDebugVector(origin, velVec, Colors.Yellow, 2f);
             if (Acceleration != Vector2.Zero)
-                Utils.CustomEntityRenderEngineLocator.Renderer.QueueDebugVector(origin, accVec, Colors.DodgerBlue, 2f);
+                Utils.EntityRendererFinder.Renderer.QueueDebugVector(origin, accVec, Colors.DodgerBlue, 2f);
         }
     }
 

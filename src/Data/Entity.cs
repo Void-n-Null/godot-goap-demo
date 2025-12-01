@@ -46,8 +46,26 @@ public class Entity : IUpdatableEntity
 
 	private TransformComponent2D _transform;
 	private VisualComponent _visual;
-	public TransformComponent2D Transform => _transform ??= GetComponent<TransformComponent2D>();
-	public VisualComponent Visual => _visual ??= GetComponent<VisualComponent>();
+
+	public TransformComponent2D Transform
+	{
+		get
+		{
+			if (_transform != null) return _transform;
+			_transform = GetComponent<TransformComponent2D>();
+			return _transform; // May be null, but won't cache null permanently
+		}
+	}
+
+	public VisualComponent Visual
+	{
+		get
+		{
+			if (_visual != null) return _visual;
+			_visual = GetComponent<VisualComponent>();
+			return _visual; // May be null, but won't cache null permanently
+		}
+	}
 
 	/// <summary>
 	/// Adds a tag to this entity.

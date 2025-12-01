@@ -36,7 +36,7 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
         set
         {
             if (_position == value) return;
-            if (!_isAttached) return; // Don't allow changes before attachment
+            if (!_isAttached) throw new InvalidOperationException("Cannot modify Position before component is attached to entity");
             _position = value;
             DirtyMask |= TransformDirtyFlags.Position;
             PositionChanged?.Invoke(Entity);
@@ -49,7 +49,7 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
         set
         {
             if (Mathf.IsEqualApprox(_rotation, value)) return;
-            if (!_isAttached) return; // Don't allow changes before attachment
+            if (!_isAttached) throw new InvalidOperationException("Cannot modify Rotation before component is attached to entity");
             _rotation = value;
             DirtyMask |= TransformDirtyFlags.Rotation;
             RotationChanged?.Invoke(Entity);
@@ -62,7 +62,7 @@ public class TransformComponent2D(Vector2 Position = default, float Rotation = d
         set
         {
             if (_scale == value) return;
-            if (!_isAttached) return; // Don't allow changes before attachment
+            if (!_isAttached) throw new InvalidOperationException("Cannot modify Scale before component is attached to entity");
             _scale = value;
             DirtyMask |= TransformDirtyFlags.Scale;
             ScaleChanged?.Invoke(Entity);

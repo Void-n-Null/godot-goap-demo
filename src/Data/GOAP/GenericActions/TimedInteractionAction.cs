@@ -140,11 +140,44 @@ public sealed class TimedInteractionAction : IAction, IRuntimeGuard
 
     public bool StillValid(Entity agent)
     {
-        if (_failed || _targetEntity == null)
+        if (_failed)
             return false;
 
-        // Use IsActive instead of expensive linear search through all entities
-        return _targetEntity.IsActive;
+        // If current target is gone, try to find a new one instead of failing
+        if (_targetEntity == null || !_targetEntity.IsActive)
+        {
+            var newTarget = FindNearestTarget(agent);
+            if (newTarget != null)
+            {
+                // Release old reservation if we had one
+                if (_targetEntity != null && _finderConfig.ShouldReserve)
+                {
+                    ResourceReservationManager.Instance.Release(_targetEntity, agent);
+                }
+                
+                // Switch to new target
+                _targetEntity = newTarget;
+                
+                // Reserve new target
+                if (_finderConfig.ShouldReserve && !ResourceReservationManager.Instance.TryReserve(_targetEntity, agent))
+                {
+                    LM.Warning($"[{agent.Name}] {_actionName}: Found new target but couldn't reserve it");
+                    return false;
+                }
+                
+                // Reset timer since we're starting fresh with a new target
+                _timer = 0f;
+                
+                LM.Info($"[{agent.Name}] {_actionName}: Original target gone, switching to {_targetEntity.Name}");
+                return true;
+            }
+            
+            // No alternative target found - now we can fail
+            LM.Warning($"[{agent.Name}] {_actionName}: Target gone and no alternatives found");
+            return false;
+        }
+
+        return true;
     }
 
     public void Fail(string reason)

@@ -19,7 +19,7 @@ public partial class NPCSelectionVisualizer : SingletonNode<NPCSelectionVisualiz
     const float childHeightMultiplier = 0.75f;
 
     private Entity _selectedNPC;
-    private CustomEntityRenderEngine _renderer;
+    private EntityRenderEngine _renderer;
 
     public override void _Ready()
     {
@@ -54,7 +54,7 @@ public partial class NPCSelectionVisualizer : SingletonNode<NPCSelectionVisualiz
     {
         if (_renderer == null)
         {
-            _renderer = CustomEntityRenderEngineLocator.Renderer;
+            _renderer = EntityRendererFinder.Renderer;
         }
 
         if (_renderer == null || _selectedNPC == null)

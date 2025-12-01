@@ -11,5 +11,5 @@ public static class ServiceLocator
 {
     public static EntityManager EntityManager => EntityManager.Instance;
     public static GameManager GameManager => GameManager.Instance;
-    public static CustomEntityRenderEngine Renderer => CustomEntityRenderEngineLocator.Renderer;
+    public static EntityRenderEngine Renderer => EntityRendererFinder.Renderer;
 }

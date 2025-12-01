@@ -21,8 +21,10 @@ public static class AdvancedGoalPlanner
 {
     private static readonly PlanningConfig DefaultConfig = new() { MaxDepth = 50, MaxOpenSetSize = 1000 };
 
-    private static List<IStepFactory> _cachedFactories;
-    private static List<IStepFactory> CachedFactories => LocateStepFactories();
+    private static readonly Lazy<List<IStepFactory>> _cachedFactories = new Lazy<List<IStepFactory>>(
+        () => LocateStepFactoriesInternal(), 
+        LazyThreadSafetyMode.ExecutionAndPublication);
+    private static List<IStepFactory> CachedFactories => _cachedFactories.Value;
 
     #region Helper Methods
 
@@ -296,13 +298,13 @@ public static class AdvancedGoalPlanner
     /// Locate all step factories in the current assembly
     /// </summary>
     /// <returns>List of step factories</returns>
-    private static List<IStepFactory> LocateStepFactories(Assembly assembly = null)
+    private static List<IStepFactory> LocateStepFactoriesInternal(Assembly assembly = null)
     {
         if (assembly == null)
             assembly = Assembly.GetExecutingAssembly();
 
-        // Discover factories reflectively only once
-        return _cachedFactories ??=
+        // Discover factories reflectively (thread-safe via Lazy<T>)
+        return
         [
             .. assembly.GetTypes()
             .Where(t => typeof(IStepFactory).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface)

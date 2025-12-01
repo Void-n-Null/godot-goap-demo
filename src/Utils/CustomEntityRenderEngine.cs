@@ -8,10 +8,12 @@ namespace Game.Utils;
 /// Immediate-mode 2D renderer that draws many sprites without per-entity nodes.
 /// Sprites are globally sorted by world Y each frame (or when dirty) for painter's-order depth.
 /// </summary>
-public partial class CustomEntityRenderEngine : Node2D
+public partial class EntityRenderEngine : Node2D
 {
 	[Export] public bool UseShaderOverlay = true;
 	private readonly Dictionary<Texture2D, Vector2> _textureSizeCache = new();
+	private readonly LinkedList<Texture2D> _textureCacheLRU = new();
+	private const int MAX_TEXTURE_CACHE_SIZE = 1000; // Limit cache size to prevent memory leaks
 
 	private struct DebugArrow
 	{
@@ -115,7 +117,7 @@ public partial class CustomEntityRenderEngine : Node2D
 	public override void _Ready()
 	{
 		base._Ready();
-		CustomEntityRenderEngineLocator.Renderer = this;
+		EntityRendererFinder.Renderer = this;
 		SetProcess(true);
 
 	if (UseShaderOverlay)
@@ -130,8 +132,8 @@ public partial class CustomEntityRenderEngine : Node2D
 	public override void _ExitTree()
 	{
 		base._ExitTree();
-		if (CustomEntityRenderEngineLocator.Renderer == this)
-			CustomEntityRenderEngineLocator.Renderer = null;
+		if (EntityRendererFinder.Renderer == this)
+			EntityRendererFinder.Renderer = null;
 	}
 
 	public override void _Process(double delta)
@@ -287,7 +289,15 @@ public partial class CustomEntityRenderEngine : Node2D
 			if (!_textureSizeCache.TryGetValue(it.Texture, out var size))
 			{
 				size = it.Texture.GetSize();
+				// LRU eviction: if cache is full, remove oldest entry
+				if (_textureSizeCache.Count >= MAX_TEXTURE_CACHE_SIZE)
+				{
+					var oldest = _textureCacheLRU.First.Value;
+					_textureCacheLRU.RemoveFirst();
+					_textureSizeCache.Remove(oldest);
+				}
 				_textureSizeCache[it.Texture] = size;
+				_textureCacheLRU.AddLast(it.Texture);
 			}
 			// var size = it.Texture.GetSize();
 			var rect = new Rect2(-size * 0.5f, size);
@@ -441,7 +451,7 @@ public partial class CustomEntityRenderEngine : Node2D
 	}
 }
 
-public static class CustomEntityRenderEngineLocator
+public static class EntityRendererFinder
 {
-	public static CustomEntityRenderEngine Renderer { get; set; }
+	public static EntityRenderEngine Renderer { get; set; }
 }

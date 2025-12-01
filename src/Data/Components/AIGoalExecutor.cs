@@ -252,34 +252,32 @@ public class AIGoalExecutor : IActiveComponent
 
             var tickResult = _currentPlan.Tick(Entity, (float)delta, goalChecker);
 
-            if (tickResult)
+            if (tickResult == PlanTickResult.Succeeded)
             {
-                if (_currentPlan.Succeeded)
-                {
-                    _currentPlan = null;
-                    _stateDirty = true;
-                    _consecutiveFailures = 0;
-                    _forceReplan = true; // Always replan immediately after success (e.g. for continuous goals like Idle)
-                    OnPlanSucceeded?.Invoke();
-                }
-                else
-                {
-                    LM.Warning($"[{Entity.Name}] Plan execution failed for '{_currentGoal?.Name}'");
-                    var failedGoal = _currentGoal;
-                    _currentPlan = null;
-                    _stateDirty = true;
-                    _consecutiveFailures++;
-
-                    _forceReplan = true;
-                    if (_consecutiveFailures > MAX_IMMEDIATE_RETRIES)
-                    {
-                        LM.Warning($"[{Entity.Name}] Too many consecutive failures ({_consecutiveFailures}), waiting before retry");
-                    }
-
-                    GlobalWorldStateManager.Instance.ForceRefresh();
-                    OnPlanExecutionFailed?.Invoke(failedGoal);
-                }
+                _currentPlan = null;
+                _stateDirty = true;
+                _consecutiveFailures = 0;
+                _forceReplan = true; // Always replan immediately after success (e.g. for continuous goals like Idle)
+                OnPlanSucceeded?.Invoke();
             }
+            else if (tickResult == PlanTickResult.Failed)
+            {
+                LM.Warning($"[{Entity.Name}] Plan execution failed for '{_currentGoal?.Name}'");
+                var failedGoal = _currentGoal;
+                _currentPlan = null;
+                _stateDirty = true;
+                _consecutiveFailures++;
+
+                _forceReplan = true;
+                if (_consecutiveFailures > MAX_IMMEDIATE_RETRIES)
+                {
+                    LM.Warning($"[{Entity.Name}] Too many consecutive failures ({_consecutiveFailures}), waiting before retry");
+                }
+
+                GlobalWorldStateManager.Instance.ForceRefresh();
+                OnPlanExecutionFailed?.Invoke(failedGoal);
+            }
+            // If tickResult == PlanTickResult.Running, continue executing next frame
         }
     }
 
@@ -394,16 +392,17 @@ public class AIGoalExecutor : IActiveComponent
 
         _stateDirty = true;
         _lastStateBuildTime = float.NegativeInfinity; // force immediate rebuild next tick
-        _forceReplan = true;
         _proximityRefreshPending = true;
-
-        if (_currentPlan != null && !_currentPlan.IsComplete)
+        
+        // DON'T cancel the current plan here! The IRuntimeGuard.StillValid() check in Plan.Tick
+        // will properly detect when THIS agent's specific target is gone.
+        // Cancelling here would cause ALL agents to give up when ANY food entity despawns,
+        // even if they were targeting different food.
+        //
+        // Only set _forceReplan if we have NO current plan, so we can find a new target.
+        if (_currentPlan == null || _currentPlan.IsComplete)
         {
-            if (currentGoalState != null)
-            {
-                LM.Info($"[{Entity.Name}] World event for {targetComp.Target} invalidated current plan, cancelling.");
-                _currentPlan.Cancel(Entity);
-            }
+            _forceReplan = true;
         }
     }
 

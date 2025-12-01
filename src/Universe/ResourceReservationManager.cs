@@ -17,6 +17,12 @@ public class ResourceReservationManager
     private static ResourceReservationManager _instance;
     public static ResourceReservationManager Instance => _instance ??= new ResourceReservationManager();
 
+    private ResourceReservationManager()
+    {
+        // Subscribe to entity despawn events for automatic cleanup
+        WorldEventBus.Instance.EntityDespawned += OnEntityDespawned;
+    }
+
     // OPTIMIZED: ConcurrentDictionary allows lock-free reads (critical for IsAvailableFor hot path)
     // Maps resource entity ID to the agent ID that has reserved it
     private ConcurrentDictionary<Guid, Guid> _reservations = new();
@@ -112,33 +118,12 @@ public class ResourceReservationManager
         {
             if (_agentReservations.TryGetValue(agentId, out var reservedResources))
             {
-                // OPTIMIZED: Remove from ConcurrentDictionary without holding lock for each removal
+                // Remove from ConcurrentDictionary and clear entity cache fields
                 foreach (var resourceId in reservedResources)
                 {
                     if (_reservations.TryRemove(resourceId, out _))
                     {
-                        // We can't easily clear ReservedByAgentId on the entity instance here
-                        // because we only have the Guid.
-                        // However, this method is typically called on death or cleanup.
-                        // The dictionary is the ground truth. 
-                        // If IsAvailableFor checks the Entity field, it might see a stale reservation 
-                        // if we don't clear it.
-                        
-                        // BUT, getting the Entity by ID is slow.
-                        // If the entity is still alive, this is a problem.
-                        // If the entity is dead, it doesn't matter.
-                        
-                        // Ideally we should look up the entity.
-                        // For now, we accept the dictionary handles the logic correctness, 
-                        // but the field is for speed.
-                        // To be safe: IsAvailableFor should strictly trust the field only if it matches?
-                        // No, IsAvailableFor is the hot path.
-                        
-                        // If we can't clear the field, we have a stale "Reserved" state on the resource entity.
-                        // That resource will appear reserved by 'agent' (who released it).
-                        // If 'agent' is dead, it's permanently reserved? That's BAD.
-                        
-                        // We MUST clear the field.
+                        // Look up entity and clear cached field
                         var ent = EntityManager.Instance?.GetEntityById(resourceId);
                         if (ent != null)
                         {
@@ -147,7 +132,50 @@ public class ResourceReservationManager
                     }
                 }
                 reservedResources.Clear();
+                _agentReservations.Remove(agentId);
                 LM.Info($"[Reservation] {agent.Name} released all reservations");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Handle entity despawn events to automatically clean up reservations
+    /// </summary>
+    private void OnEntityDespawned(Entity entity)
+    {
+        if (entity == null)
+            return;
+
+        var entityId = entity.Id;
+
+        // If this entity was a resource, release its reservation
+        if (_reservations.TryRemove(entityId, out var agentId))
+        {
+            lock (_lock)
+            {
+                _agentReservations[agentId]?.Remove(entityId);
+            }
+            LM.Debug($"[Reservation] Auto-released despawned resource {entity.Name}");
+        }
+
+        // If this entity was an agent, release all its reservations
+        lock (_lock)
+        {
+            if (_agentReservations.TryGetValue(entityId, out var reservedResources))
+            {
+                foreach (var resourceId in reservedResources)
+                {
+                    if (_reservations.TryRemove(resourceId, out _))
+                    {
+                        var resource = EntityManager.Instance?.GetEntityById(resourceId);
+                        if (resource != null)
+                        {
+                            resource.ReservedByAgentId = Guid.Empty;
+                        }
+                    }
+                }
+                _agentReservations.Remove(entityId);
+                LM.Debug($"[Reservation] Auto-released all reservations for despawned agent {entity.Name}");
             }
         }
     }
