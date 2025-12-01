@@ -69,12 +69,13 @@ public class UtilityGoalSelector : IActiveComponent
     private void OnExecutorPlanSucceeded()
     {
         // Plan succeeded, check if we should switch goals or continue
+        LM.Debug($"[{Entity.Name}] OnExecutorPlanSucceeded - re-evaluating goals");
         EvaluateAndSelectGoal();
     }
 
     private void OnExecutorGoalSatisfied()
     {
-
+        LM.Debug($"[{Entity.Name}] OnExecutorGoalSatisfied - clearing goal '{_currentGoal?.Name}'");
         // Clear cooldowns for the satisfied goal since it worked
         if (_currentGoal != null)
         {
@@ -88,6 +89,7 @@ public class UtilityGoalSelector : IActiveComponent
     private void OnExecutorNeedNewGoal()
     {
         // Executor needs a goal, assign one immediately
+        LM.Debug($"[{Entity.Name}] OnExecutorNeedNewGoal - executor has no goal");
         EvaluateAndSelectGoal();
     }
 
@@ -137,13 +139,19 @@ public class UtilityGoalSelector : IActiveComponent
         IUtilityGoal bestGoal = null;
         float bestUtility = float.MinValue;
 
+        LM.Debug($"[{Entity.Name}] EvaluateAndSelectGoal: evaluating {_availableGoals.Count} goals");
+        
         for (int i = 0; i < _availableGoals.Count; i++)
         {
             var goal = _availableGoals[i];
             if (IsGoalOnCooldown(goal))
+            {
+                LM.Debug($"  - {goal.Name}: ON COOLDOWN");
                 continue;
+            }
 
             float utility = goal.CalculateUtility(Entity);
+            LM.Debug($"  - {goal.Name}: utility={utility:F2}");
             if (utility > bestUtility)
             {
                 bestUtility = utility;

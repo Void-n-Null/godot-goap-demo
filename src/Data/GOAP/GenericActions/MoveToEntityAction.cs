@@ -26,6 +26,8 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
 
     public override void Enter(Entity agent)
     {
+        LM.Debug($"[{agent.Name}] {_actionName}: Enter called");
+        
         if (!agent.TryGetComponent(out _motor))
         {
             Fail("Agent lacks NPCMotorComponent");

@@ -88,10 +88,20 @@ public PlanTickResult Tick(Entity agent, float dt, Func<Entity, bool> goalSatisf
 			}
 
 			var step = _steps[_currentStepIndex];
-			LM.Debug($"Plan starting step {_currentStepIndex}");
+			LM.Debug($"Plan starting step {_currentStepIndex}: {step.Name}");
 
-			_currentAction = step.CreateAction();
-			_currentAction.Enter(agent);
+			try
+			{
+				_currentAction = step.CreateAction();
+				LM.Debug($"  Action created: {_currentAction?.Name ?? "null"}");
+				_currentAction.Enter(agent);
+				LM.Debug($"  Enter completed");
+			}
+			catch (Exception ex)
+			{
+				LM.Error($"  Exception during step creation/enter: {ex.Message}");
+				throw;
+			}
 		}
 
 		var status = _currentAction.Update(agent, dt);

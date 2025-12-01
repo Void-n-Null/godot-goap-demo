@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Game.Data;
 using Game.Data.Components;
 using Game.Data.GOAP;
+using Game.Utils;
 using Godot;
 
 namespace Game.Data.UtilityAI;
@@ -40,6 +41,11 @@ public class EatFoodGoal : IUtilityGoal
             return false;
         
         // Satisfied when hunger is below 20%
-        return npcData.Hunger < npcData.MaxHunger * 0.2f;
+        bool satisfied = npcData.Hunger < npcData.MaxHunger * 0.2f;
+        if (satisfied)
+        {
+            LM.Debug($"[EatFoodGoal] IsSatisfied=true for {agent.Name}: Hunger={npcData.Hunger}/{npcData.MaxHunger}");
+        }
+        return satisfied;
     }
 }

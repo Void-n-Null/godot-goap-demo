@@ -86,10 +86,25 @@ public class GenericStepFactory : IStepFactory
         var pre = State.Empty();
         pre.Set(FactKeys.WorldHas(type), true);
 
+        // Effects: Set NearTarget for this type, and clear NearTarget for key LOCATION types
+        // Only clear for fixed locations (Campfire, Tree, Bed) - not pickupable items
+        // This ensures the planner knows moving to X means you're no longer near fixed locations
         var effects = new List<(string, object)>
         {
             (FactKeys.NearTarget(type), (FactValue)true)
         };
+        
+        // Key location types that require physical presence
+        // Includes fixed locations AND items dropped at fixed locations (like Stick from trees)
+        var locationTypes = new[] { TargetType.Campfire, TargetType.Tree, TargetType.Bed, TargetType.Stick };
+        
+        foreach (var locationType in locationTypes)
+        {
+            if (locationType != type)
+            {
+                effects.Add((FactKeys.NearTarget(locationType), (FactValue)false));
+            }
+        }
 
         bool requiresExclusiveUse = type != TargetType.Campfire;
 

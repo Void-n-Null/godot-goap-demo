@@ -105,6 +105,11 @@ public class AIGoalExecutor : IActiveComponent
     {
         if (_currentGoal != goal)
         {
+            var oldGoal = _currentGoal?.Name ?? "None";
+            var newGoal = goal?.Name ?? "None";
+            var hadPlan = _currentPlan != null && !_currentPlan.IsComplete;
+            LM.Debug($"[{Entity?.Name}] SetGoal: {oldGoal} -> {newGoal} (had active plan: {hadPlan})");
+            
             _currentGoal = goal;
             _currentPlan = null;
             _stateDirty = true;
@@ -144,12 +149,22 @@ public class AIGoalExecutor : IActiveComponent
         {
             if (_planningTask.IsCompletedSuccessfully)
             {
-                _currentPlan = _planningTask.Result;
+                var newPlan = _planningTask.Result;
                 PlanningInProgress = false;
                 _planningTask = null;
 
-                if (_currentPlan != null && _currentPlan.Steps.Count > 0)
+                // CRITICAL FIX: Don't overwrite an active plan!
+                // If we already have a running plan, discard the new one.
+                // This prevents race conditions where a planning task started earlier
+                // completes and overwrites the current active plan.
+                if (_currentPlan != null && !_currentPlan.IsComplete)
                 {
+                    LM.Debug($"[{Entity.Name}] Discarding completed plan - already have active plan");
+                    // Don't use the new plan, keep executing current one
+                }
+                else if (newPlan != null && newPlan.Steps.Count > 0)
+                {
+                    _currentPlan = newPlan;
                     LM.Info($"[{Entity.Name}] New plan for '{_currentGoal?.Name}': {_currentPlan.Steps.Count} steps");
                     _consecutiveFailures = 0;
                 }
@@ -184,6 +199,7 @@ public class AIGoalExecutor : IActiveComponent
 
         if (_currentGoal != null && _currentGoal.IsSatisfied(Entity))
         {
+            LM.Info($"[{Entity.Name}] Goal '{_currentGoal.Name}' satisfied, clearing plan and goal");
             _currentPlan = null;
             _currentGoal = null;
             OnGoalSatisfied?.Invoke();
@@ -226,6 +242,7 @@ public class AIGoalExecutor : IActiveComponent
                 _forceReplan = false;
 
                 var goalState = _currentGoal.GetGoalState(Entity);
+                LM.Debug($"[{Entity.Name}] Starting planning task for '{_currentGoal?.Name}'");
                 // Need to pass a clone because planner might mutate it during search (or A* node expansion)
                 _planningTask = AdvancedGoalPlanner.ForwardPlanAsync(currentState.Clone(), goalState);
             }
