@@ -164,15 +164,18 @@ public partial class NPCInspectorInventoryTab : VBoxContainer
         }
     }
 
-    private string GetResourceIcon(TargetType type)
+    private string GetResourceIcon(Tag tag)
     {
-        return type switch
+        string tagName = tag.ToString();
+        return tagName switch
         {
-            TargetType.Stick => "🪵",
-            TargetType.Food => "🍖",
-            TargetType.Tree => "🌳",
-            TargetType.Campfire => "🔥",
-            TargetType.Bed => "🛏️",
+            "Stick" => "🪵",
+            "Food" => "🍖",
+            "RawBeef" => "🥩",
+            "Steak" => "🥩",
+            "Tree" => "🌳",
+            "Campfire" => "🔥",
+            "Bed" => "🛏️",
             _ => "📦"
         };
     }

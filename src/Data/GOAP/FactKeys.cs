@@ -1,5 +1,3 @@
-using Game.Data.Components;
-
 namespace Game.Data.GOAP;
 
 /// <summary>
@@ -9,19 +7,19 @@ namespace Game.Data.GOAP;
 public static class FactKeys
 {
     // Agent state facts
-    public static string AgentHas(TargetType resource) => $"Has_{resource}";
-    public static string AgentCount(TargetType resource) => $"Agent_{resource}_Count";
-    public static string NearTarget(TargetType target) => $"Near_{target}";
+    public static string AgentHas(Tag tag) => $"Has_{tag}";
+    public static string AgentCount(Tag tag) => $"Agent_{tag}_Count";
+    public static string NearTarget(Tag tag) => $"Near_{tag}";
 
     // World state facts
-    public static string WorldHas(TargetType resource) => $"World_Has_{resource}";
-    public static string WorldCount(TargetType resource) => $"World_{resource}_Count";
+    public static string WorldHas(Tag tag) => $"World_Has_{tag}";
+    public static string WorldCount(Tag tag) => $"World_{tag}_Count";
 
     // Action state facts
-    public static string TargetChopped(TargetType target) => $"{target}_Chopped";
+    public static string TargetChopped(Tag tag) => $"{tag}_Chopped";
     
     // Cooking facts
-    public static string CampfireCooking(TargetType target) => $"Campfire_Cooking_{target}";
+    public static string CampfireCooking(Tag tag) => $"Campfire_Cooking_{tag}";
 
     // Common facts
     public const string AgentId = "AgentId";

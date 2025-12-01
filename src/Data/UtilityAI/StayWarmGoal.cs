@@ -5,7 +5,7 @@ using Godot;
 
 namespace Game.Data.UtilityAI;
 
-public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTargetInterest
+public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTagInterest
 {
     private const float ComfortableTemperature = 70f;
     private const float CriticalTemperature = 30f;
@@ -33,7 +33,7 @@ public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTar
             utility += 0.2f; // panic bonus when dangerously cold
         }
 
-        if (npcData.Resources.TryGetValue(TargetType.Stick, out var sticks))
+        if (npcData.Resources.TryGetValue(Tags.Stick, out var sticks))
         {
             utility += Mathf.Clamp(sticks / 4f, 0f, 1f) * 0.1f; // more sticks = easier to build fire
         }
@@ -51,7 +51,7 @@ public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTar
     {
         // Goal: be near a campfire so temperature can rise
         var s = new State();
-        s.Set(FactKeys.NearTarget(TargetType.Campfire), true);
+        s.Set(FactKeys.NearTarget(Tags.Campfire), true);
         return s;
     }
     
@@ -74,15 +74,15 @@ public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTar
 
         var nearbyCampfires = Universe.EntityManager.Instance.SpatialPartition
             .QueryCircle(transform.Position, WarmthRadius,
-                e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Campfire,
+                e => e.HasTag(Tags.Campfire),
                 maxResults: 1);
 
         return nearbyCampfires != null && nearbyCampfires.Count > 0;
     }
 
-    public bool IsTargetTypeRelevant(TargetType targetType)
+    public bool IsTargetTagRelevant(Tag tag)
     {
         // Only campfires should cause immediate replanning; harvested sticks are tracked via state updates.
-        return targetType == TargetType.Campfire;
+        return tag == Tags.Campfire;
     }
 }

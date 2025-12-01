@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Game.Data;
 using Game.Data.Components;
 using Game.Universe;
 using Game.Utils;
@@ -69,8 +70,8 @@ public class RetrieveCookedItemAction : IAction
             {
                 if (agent.TryGetComponent<NPCData>(out var data))
                 {
-                    var type = TargetType.Steak; // Hardcoded for now
-                    data.Resources[type] = (data.Resources.TryGetValue(type, out int c) ? c : 0) + 1;
+                    var tag = Tags.Steak; // Hardcoded for now
+                    data.Resources[tag] = (data.Resources.TryGetValue(tag, out int c) ? c : 0) + 1;
                     LM.Info($"Retrieved {cookedBlueprint.Name} (Steak) from campfire!");
                 }
                 

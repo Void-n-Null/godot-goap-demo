@@ -91,7 +91,12 @@ public static class AdvancedGoalPlanner
         double stepCost = step.GetCost(currentState);
         double newGCost = currentGCost + stepCost;
         float heuristic = StateComparison.CalculateStateComparisonHeuristic(newState, goalState, implicitGoals);
-        float fScore = (float)newGCost + heuristic;
+        
+        // Add significant depth penalty to strongly prefer shorter paths
+        // Without this, A* explores deep cooking paths before finding the simpler direct path
+        // Each step adds 0.5 to fScore, making 50-step paths significantly more expensive than 3-step paths
+        float depthPenalty = newPath.Depth * 1f;
+        float fScore = (float)newGCost + heuristic + depthPenalty;
 
         return (newState, newPath, newGCost, fScore);
     }
@@ -288,7 +293,8 @@ public static class AdvancedGoalPlanner
         // Debug output to show pruning effectiveness
         if (allSteps.Count > pruned.Count)
         {
-            // GD.Print($"[Pruning] Reduced steps from {allSteps.Count} to {pruned.Count} ({100.0 * pruned.Count / allSteps.Count:F1}% retained)");
+            LM.Debug($"[Pruning] Reduced steps from {allSteps.Count} to {pruned.Count}");
+            LM.Debug($"[Pruning] Kept steps: {string.Join(", ", pruned.Select(s => s.Name))}");
         }
 
         return pruned;
@@ -321,6 +327,11 @@ public static class AdvancedGoalPlanner
         //Alright, when we start, these are all the steps we can take.
         var steps = GenerateStepsForState(initialState, goalState);
         var implicitGoals = DeriveImplicitRequirements(initialState, goalState, steps);
+        
+        // Debug: Log goal state and available steps (using GD.Print to bypass LM toggle)
+        GD.Print($"[Planner] Goal: {string.Join(", ", goalState.FactsById.Select(f => $"{FactRegistry.GetName(f.Key)}={f.Value}"))}");
+        GD.Print($"[Planner] Available steps ({steps.Count}): {string.Join(", ", steps.Select(s => s.Name))}");
+        GD.Print($"[Planner] Initial state: {initialState}");
 
         //Now then... Let's begin our A* Forward planning!
         var openSet = new PriorityQueue<(State state, PathNode path, double gCost, float fScore), float>();
@@ -349,6 +360,14 @@ public static class AdvancedGoalPlanner
             {
                 var path = pathNode?.ReconstructPath() ?? new List<Step>();
                 LM.Info($"Plan found: {path.Count} steps, total cost {gCost:F1}");
+                
+                // Log each step in the plan for debugging
+                if (path.Count > 0)
+                {
+                    var stepNames = string.Join(" → ", path.Select(s => s.Name));
+                    LM.Info($"Plan steps: {stepNames}");
+                }
+                
                 return new Plan(path, initialState);
             }
 

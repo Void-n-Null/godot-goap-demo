@@ -11,15 +11,15 @@ public class DepositItemAction : IAction
 {
     private bool _complete;
     private bool _failed;
-    private TargetType _inputType;
-    private TargetType _outputType;
+    private Tag _inputTag;
+    private Tag _outputTag;
     
-    public string Name => $"Deposit {_inputType}";
+    public string Name => $"Deposit {_inputTag}";
 
-    public DepositItemAction(TargetType input, TargetType output)
+    public DepositItemAction(Tag input, Tag output)
     {
-        _inputType = input;
-        _outputType = output;
+        _inputTag = input;
+        _outputTag = output;
     }
 
     public void Enter(Entity agent)
@@ -40,37 +40,33 @@ public class DepositItemAction : IAction
         {
             if (agent.TryGetComponent<NPCData>(out var data))
             {
-                if (data.Resources.TryGetValue(_inputType, out int count) && count > 0)
+                if (data.Resources.TryGetValue(_inputTag, out int count) && count > 0)
                 {
                     // Remove item
-                    data.Resources[_inputType] = count - 1;
+                    data.Resources[_inputTag] = count - 1;
                     
-                    // Start cooking
-                    EntityBlueprint inputBP = _inputType == TargetType.RawBeef ? Food.RawBeef : null;
-                    EntityBlueprint outputBP = _outputType == TargetType.Steak ? Food.Steak : null;
+                    // Start cooking - map tags to blueprints
+                    EntityBlueprint inputBP = _inputTag == Tags.RawBeef ? Food.RawBeef : null;
+                    EntityBlueprint outputBP = _outputTag == Tags.Steak ? Food.Steak : null;
                     
                     if (inputBP != null && outputBP != null)
                     {
                         // In a full system, we'd extract this from the Blueprint metadata.
-                        // For this demo, we map known types to their cook times.
-                        float cookTime = _inputType switch 
-                        {
-                            TargetType.RawBeef => 5.0f,
-                            _ => 5.0f
-                        };
+                        // For this demo, we map known tags to their cook times.
+                        float cookTime = _inputTag == Tags.RawBeef ? 5.0f : 5.0f;
 
                         station.StartCooking(inputBP, outputBP, cookTime);
-                        LM.Info($"Deposited {_inputType} into {campfire.Name}. Cooking started (Time: {cookTime}s)!");
+                        LM.Info($"Deposited {_inputTag} into {campfire.Name}. Cooking started (Time: {cookTime}s)!");
                         _complete = true;
                     }
                     else
                     {
-                         Fail($"DepositItemAction: Could not map types to blueprints: {_inputType}->{_outputType}");
+                         Fail($"DepositItemAction: Could not map tags to blueprints: {_inputTag}->{_outputTag}");
                     }
                 }
                 else
                 {
-                     Fail($"DepositItemAction: Agent has no {_inputType}!");
+                     Fail($"DepositItemAction: Agent has no {_inputTag}!");
                 }
             }
         }

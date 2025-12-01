@@ -18,15 +18,15 @@ public class MinimalScenario : Scenario
         Log("Setting up minimal scenario...");
 
         // Spawn a few trees
-        for (int i = 0; i < 20; i++)
+        for (int i = 0; i < 30; i++)
             SpawnEntity.Now(Nature.SimpleTree, Random.NextVector2(-1000, 1000));
 
         // Spawn some food
-        for (int i = 0; i < 20; i++)
+        for (int i = 0; i < 30; i++)
             SpawnEntity.Now(Food.RawBeef, Random.NextVector2(-1000, 1000));
 
         // Spawn a handful of NPCs
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 2; i++)
             SpawnEntity.Now(NPC.Intelligent, Random.NextVector2(-500, 500));
 
         Log($"Spawned 50 total entities");

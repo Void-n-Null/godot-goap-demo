@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Game.Data.Components;
+using System.Linq;
 using Game.Data.Crafting;
 
 namespace Game.Data.GOAP.GenericActions;
@@ -29,9 +29,8 @@ public class StepConfig
 
 /// <summary>
 /// Unified step factory that creates parameterized steps instead of hardcoded ones.
-/// Replaces all the individual XxxStepFactory classes.
+/// Now uses TargetTagRegistry for data-driven configuration.
 /// </summary>
-
 public class GenericStepFactory : IStepFactory
 {
     private readonly List<StepConfig> _stepConfigs = [];
@@ -43,16 +42,38 @@ public class GenericStepFactory : IStepFactory
 
     private void RegisterAllSteps()
     {
-        foreach (TargetType type in Enum.GetValues<TargetType>())
+        // Generate movement and pickup steps for all target tags
+        foreach (var tag in Tags.TargetTags)
         {
-            RegisterMoveToTargetStep(type);
-            RegisterPickUpTargetStep(type);
+            RegisterMoveToTargetStep(tag);
+            
+            var meta = TargetTagRegistry.Get(tag);
+            if (meta.CanBePickedUp)
+            {
+                RegisterPickUpTargetStep(tag, meta);
+            }
         }
 
-        RegisterChopTreeStep();
-        RegisterConsumeFoodStep();
+        // Generate steps from registry definitions
+        foreach (var harvest in TargetTagRegistry.Harvests)
+        {
+            RegisterHarvestStep(harvest);
+        }
+        
+        foreach (var cooking in TargetTagRegistry.Cooking)
+        {
+            RegisterCookingSteps(cooking);
+        }
+        
+        foreach (var consumable in TargetTagRegistry.Consumables)
+        {
+            RegisterConsumeStep(consumable);
+        }
+
+        // Crafting already uses CraftingRegistry (data-driven)
         RegisterCraftingSteps();
-        RegisterCookingSteps();
+        
+        // Special actions
         RegisterSleepInBedStep();
         RegisterIdleStep();
     }
@@ -60,14 +81,14 @@ public class GenericStepFactory : IStepFactory
     private void RegisterSleepInBedStep()
     {
         var pre = State.Empty();
-        pre.Set(FactKeys.NearTarget(TargetType.Bed), true);
-        pre.Set(FactKeys.WorldHas(TargetType.Bed), true);
+        pre.Set(FactKeys.NearTarget(Tags.Bed), true);
+        pre.Set(FactKeys.WorldHas(Tags.Bed), true);
         pre.Set("IsSleepy", true);
 
         var effects = new List<(string, object)>
         {
             ("IsSleepy", (FactValue)false),
-            (FactKeys.NearTarget(TargetType.Bed), (FactValue)false)
+            (FactKeys.NearTarget(Tags.Bed), (FactValue)false)
         };
 
         var config = new StepConfig("SleepInBed")
@@ -81,49 +102,46 @@ public class GenericStepFactory : IStepFactory
         _stepConfigs.Add(config);
     }
 
-    private void RegisterMoveToTargetStep(TargetType type)
+    private void RegisterMoveToTargetStep(Tag tag)
     {
+        var meta = TargetTagRegistry.Get(tag);
+        
         var pre = State.Empty();
-        pre.Set(FactKeys.WorldHas(type), true);
+        pre.Set(FactKeys.WorldHas(tag), true);
 
-        // Effects: Set NearTarget for this type, and clear NearTarget for key LOCATION types
-        // Only clear for fixed locations (Campfire, Tree, Bed) - not pickupable items
-        // This ensures the planner knows moving to X means you're no longer near fixed locations
+        // Effects: Set NearTarget for this tag, and clear NearTarget for ALL other tags
+        // This is critical: the planner must understand that moving to X means you're NOT near Y anymore.
+        // Without this, agents try to batch up "near" facts thinking they can be near multiple things.
         var effects = new List<(string, object)>
         {
-            (FactKeys.NearTarget(type), (FactValue)true)
+            (FactKeys.NearTarget(tag), (FactValue)true)
         };
         
-        // Key location types that require physical presence
-        // Includes fixed locations AND items dropped at fixed locations (like Stick from trees)
-        var locationTypes = new[] { TargetType.Campfire, TargetType.Tree, TargetType.Bed, TargetType.Stick };
-        
-        foreach (var locationType in locationTypes)
+        // Clear NearTarget for ALL target tags when moving (except the destination)
+        foreach (var otherTag in Tags.TargetTags)
         {
-            if (locationType != type)
+            if (otherTag != tag)
             {
-                effects.Add((FactKeys.NearTarget(locationType), (FactValue)false));
+                effects.Add((FactKeys.NearTarget(otherTag), (FactValue)false));
             }
         }
 
-        bool requiresExclusiveUse = type != TargetType.Campfire;
-
-        var config = new StepConfig($"GoTo_{type}")
+        var config = new StepConfig($"GoTo_{tag}")
         {
             ActionFactory = () => new MoveToEntityAction(
-                EntityFinderConfig.ByTargetType(
-                    type,
-                    radius: 5000f,
-                    requireUnreserved: requiresExclusiveUse,
-                    shouldReserve: requiresExclusiveUse),
+                EntityFinderConfig.ByTag(
+                    tag,
+                    radius: meta.MoveSearchRadius,
+                    requireUnreserved: meta.RequiresExclusiveUse,
+                    shouldReserve: meta.RequiresExclusiveUse),
                 reachDistance: 64f,
-                actionName: $"GoTo_{type}"
+                actionName: $"GoTo_{tag}"
             ),
             Preconditions = pre,
             Effects = effects,
             CostFactory = ctx =>
             {
-                if (ctx.TryGet($"Distance_To_{type}", out var distObj))
+                if (ctx.TryGet($"Distance_To_{tag}", out var distObj))
                     return distObj.FloatValue / 100.0;
                 return 10.0;
             }
@@ -148,49 +166,46 @@ public class GenericStepFactory : IStepFactory
         _stepConfigs.Add(config);
     }
 
-    private void RegisterPickUpTargetStep(TargetType type)
+    private void RegisterPickUpTargetStep(Tag tag, TargetTagMetadata meta)
     {
-        if (type == TargetType.Tree || type == TargetType.Bed || type == TargetType.Campfire)
-            return;
-
         var pre = State.Empty();
-        pre.Set(FactKeys.WorldHas(type), true);
-        pre.Set(FactKeys.NearTarget(type), true);
+        pre.Set(FactKeys.WorldHas(tag), true);
+        pre.Set(FactKeys.NearTarget(tag), true);
 
         var effects = new List<(string, object)>
         {
-            (FactKeys.AgentCount(type), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.AgentCount(type), out var invObj))
+            (FactKeys.AgentCount(tag), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.AgentCount(tag), out var invObj))
                     return invObj.IntValue + 1;
                 return 1;
             })),
-            (FactKeys.AgentHas(type), (FactValue)true),
-            (FactKeys.WorldCount(type), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(type), out var worldObj))
+            (FactKeys.AgentHas(tag), (FactValue)true),
+            (FactKeys.WorldCount(tag), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(tag), out var worldObj))
                     return Math.Max(0, worldObj.IntValue - 1);
                 return 0;
             })),
-            (FactKeys.WorldHas(type), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(type), out var worldObj))
+            (FactKeys.WorldHas(tag), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(tag), out var worldObj))
                     return worldObj.IntValue - 1 > 0;
                 return false;
             }))
         };
 
-        var config = new StepConfig($"PickUp_{type}")
+        var config = new StepConfig($"PickUp_{tag}")
         {
             ActionFactory = () => new TimedInteractionAction(
                 new EntityFinderConfig
                 {
-                    Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == type,
-                    SearchRadius = 128f,
+                    Filter = e => e.HasTag(tag),
+                    SearchRadius = meta.InteractionRadius,
                     RequireUnreserved = true,
                     RequireReservation = false,
                     ShouldReserve = true
                 },
-                interactionTime: 0.5f,
-                InteractionEffectConfig.PickUp(type),
-                actionName: $"PickUp_{type}"
+                interactionTime: meta.PickupTime,
+                InteractionEffectConfig.PickUp(tag),
+                actionName: $"PickUp_{tag}"
             ),
             Preconditions = pre,
             Effects = effects,
@@ -199,174 +214,157 @@ public class GenericStepFactory : IStepFactory
 
         _stepConfigs.Add(config);
     }
-
-    private void RegisterChopTreeStep()
+    
+    private void RegisterHarvestStep(HarvestDefinition harvest)
     {
-        var targetType = TargetType.Tree;
-        var producedType = TargetType.Stick;
-
         var pre = State.Empty();
-        pre.Set(FactKeys.NearTarget(targetType), true);
-        pre.Set(FactKeys.WorldHas(targetType), true);
+        pre.Set(FactKeys.NearTarget(harvest.SourceTag), true);
+        pre.Set(FactKeys.WorldHas(harvest.SourceTag), true);
 
         var effects = new List<(string, object)>
         {
-            (FactKeys.TargetChopped(targetType), (FactValue)true),
-            (FactKeys.WorldHas(producedType), (FactValue)true),
+            (FactKeys.TargetChopped(harvest.SourceTag), (FactValue)true),
+            (FactKeys.WorldHas(harvest.ProducedTag), (FactValue)true),
 
-            (FactKeys.WorldCount(producedType), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(producedType), out var wObj))
-                    return wObj.IntValue + 4;
-                return 4;
+            (FactKeys.WorldCount(harvest.ProducedTag), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(harvest.ProducedTag), out var wObj))
+                    return wObj.IntValue + harvest.ProducedCount;
+                return harvest.ProducedCount;
             })),
 
-            (FactKeys.WorldCount(targetType), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(targetType), out var tObj))
+            (FactKeys.WorldCount(harvest.SourceTag), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(harvest.SourceTag), out var tObj))
                     return Math.Max(0, tObj.IntValue - 1);
                 return 0;
             })),
 
-            (FactKeys.WorldHas(targetType), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(targetType), out var tObj))
+            (FactKeys.WorldHas(harvest.SourceTag), (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(FactKeys.WorldCount(harvest.SourceTag), out var tObj))
                     return tObj.IntValue - 1 > 0;
                 return false;
             })),
 
-            (FactKeys.NearTarget(targetType), (FactValue)false),
-            (FactKeys.NearTarget(producedType), (FactValue)true)
+            (FactKeys.NearTarget(harvest.SourceTag), (FactValue)false),
+            (FactKeys.NearTarget(harvest.ProducedTag), (FactValue)true)
         };
 
-        var config = new StepConfig("ChopTree")
+        var config = new StepConfig(harvest.Name)
         {
             ActionFactory = () => new TimedInteractionAction(
                 new EntityFinderConfig
                 {
-                    Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Tree,
+                    Filter = e => e.HasTag(harvest.SourceTag),
                     SearchRadius = 128f,
                     RequireReservation = false,
                     ShouldReserve = true
                 },
-                interactionTime: 3.0f,
-                InteractionEffectConfig.Kill(),
-                actionName: "Chop"
+                interactionTime: harvest.InteractionTime,
+                harvest.DestroySource ? InteractionEffectConfig.Kill() : InteractionEffectConfig.None(),
+                actionName: harvest.Name.Replace("Chop", "Chop ").Replace("Mine", "Mine ").Trim()
             ),
             Preconditions = pre,
             Effects = effects,
-            CostFactory = _ => 3.0
-        };
-
-        _stepConfigs.Add(config);
-    }
-
-    private void RegisterConsumeFoodStep()
-    {
-        // Only allow consuming cooked food (Steak)
-        RegisterConsumeItemStep(TargetType.Steak, "EatSteak");
-    }
-
-    private void RegisterConsumeItemStep(TargetType type, string stepName)
-    {
-        var pre = State.Empty();
-        // Removed NearTarget requirement because we carry it
-        pre.Set(FactKeys.AgentHas(type), true); 
-        pre.Set("IsHungry", true);
-
-        var effects = new List<(string, object)>
-        {
-            ("IsHungry", (FactValue)false),
-            (FactKeys.AgentHas(type), (FactValue)false), // Consumed (assumes we only had 1 or we consume 1)
-            (FactKeys.AgentCount(type), (Func<State, FactValue>)(ctx => {
-                 if (ctx.TryGet(FactKeys.AgentCount(type), out var c))
-                     return Math.Max(0, c.IntValue - 1);
-                 return 0;
-            }))
-        };
-
-        var config = new StepConfig(stepName)
-        {
-            ActionFactory = () => new ConsumeInventoryItemAction(type),
-            Preconditions = pre,
-            Effects = effects,
-            CostFactory = _ => 2.0
+            CostFactory = _ => harvest.Cost
         };
 
         _stepConfigs.Add(config);
     }
     
-    private void RegisterCookingSteps()
+    private void RegisterCookingSteps(CookingDefinition cooking)
     {
-        // 1. Deposit Raw Beef
+        // 1. Deposit step
         var depositPre = State.Empty();
-        depositPre.Set(FactKeys.NearTarget(TargetType.Campfire), true);
-        depositPre.Set(FactKeys.WorldHas(TargetType.Campfire), true);
-        depositPre.Set(FactKeys.AgentHas(TargetType.RawBeef), true);
-        // We assume campfire is free if we are going there to deposit. 
-        // Logic for finding free campfire is in the Action.
+        depositPre.Set(FactKeys.NearTarget(cooking.StationTag), true);
+        depositPre.Set(FactKeys.WorldHas(cooking.StationTag), true);
+        depositPre.Set(FactKeys.AgentHas(cooking.InputTag), true);
         
         var depositEffects = new List<(string, object)>
         {
-            (FactKeys.AgentHas(TargetType.RawBeef), (FactValue)false),
-            (FactKeys.CampfireCooking(TargetType.RawBeef), (FactValue)true)
+            (FactKeys.AgentHas(cooking.InputTag), (FactValue)false),
+            (FactKeys.CampfireCooking(cooking.InputTag), (FactValue)true)
         };
         
-        _stepConfigs.Add(new StepConfig("DepositRawBeef")
+        _stepConfigs.Add(new StepConfig(cooking.DepositStepName)
         {
-            ActionFactory = () => new DepositItemAction(TargetType.RawBeef, TargetType.Steak),
+            ActionFactory = () => new DepositItemAction(cooking.InputTag, cooking.OutputTag),
             Preconditions = depositPre,
             Effects = depositEffects,
-            CostFactory = _ => 1.0
+            CostFactory = _ => cooking.DepositCost
         });
 
-        // 2. Retrieve Steak
+        // 2. Retrieve step
         var retrievePre = State.Empty();
-        retrievePre.Set(FactKeys.NearTarget(TargetType.Campfire), true);
-        retrievePre.Set(FactKeys.CampfireCooking(TargetType.RawBeef), true); 
-        // We use "CampfireCooking(RawBeef)" as the state that enables retrieval of Steak.
-        // It implies "Input was RawBeef, output will be Steak".
+        retrievePre.Set(FactKeys.NearTarget(cooking.StationTag), true);
+        retrievePre.Set(FactKeys.CampfireCooking(cooking.InputTag), true);
         
         var retrieveEffects = new List<(string, object)>
         {
-             (FactKeys.CampfireCooking(TargetType.RawBeef), (FactValue)false),
-             (FactKeys.AgentHas(TargetType.Steak), (FactValue)true),
-             (FactKeys.AgentCount(TargetType.Steak), (Func<State, FactValue>)(ctx => {
-                 if (ctx.TryGet(FactKeys.AgentCount(TargetType.Steak), out var c))
+             (FactKeys.CampfireCooking(cooking.InputTag), (FactValue)false),
+             (FactKeys.AgentHas(cooking.OutputTag), (FactValue)true),
+             (FactKeys.AgentCount(cooking.OutputTag), (Func<State, FactValue>)(ctx => {
+                 if (ctx.TryGet(FactKeys.AgentCount(cooking.OutputTag), out var c))
                      return c.IntValue + 1;
                  return 1;
              }))
         };
         
-        _stepConfigs.Add(new StepConfig("RetrieveSteak")
+        _stepConfigs.Add(new StepConfig(cooking.RetrieveStepName)
         {
             ActionFactory = () => new RetrieveCookedItemAction(),
             Preconditions = retrievePre,
             Effects = retrieveEffects,
-            CostFactory = _ => 10.0 // Higher cost to represent waiting time
+            CostFactory = _ => cooking.RetrieveCost
         });
     }
+    
+    private void RegisterConsumeStep(ConsumableDefinition consumable)
+    {
+        var pre = State.Empty();
+        pre.Set(FactKeys.AgentHas(consumable.ItemTag), true);
+        pre.Set(consumable.SatisfiesFact, !consumable.SatisfiesValue); // e.g., "IsHungry" = true (means we ARE hungry)
 
+        var effects = new List<(string, object)>
+        {
+            (consumable.SatisfiesFact, (FactValue)consumable.SatisfiesValue),
+            (FactKeys.AgentHas(consumable.ItemTag), (FactValue)false),
+            (FactKeys.AgentCount(consumable.ItemTag), (Func<State, FactValue>)(ctx => {
+                 if (ctx.TryGet(FactKeys.AgentCount(consumable.ItemTag), out var c))
+                     return Math.Max(0, c.IntValue - 1);
+                 return 0;
+            }))
+        };
+
+        _stepConfigs.Add(new StepConfig(consumable.StepName)
+        {
+            ActionFactory = () => new ConsumeInventoryItemAction(consumable.ItemTag),
+            Preconditions = pre,
+            Effects = effects,
+            CostFactory = _ => consumable.Cost
+        });
+    }
 
     private void RegisterCraftingSteps()
     {
         foreach (var recipe in CraftingRegistry.Recipes)
-    {
-        var pre = State.Empty();
+        {
+            var pre = State.Empty();
             foreach (var kvp in recipe.Ingredients)
             {
                 pre.Set(FactKeys.AgentHas(kvp.Key), true);
                 pre.Set(FactKeys.AgentCount(kvp.Key), kvp.Value);
             }
 
-        var effects = new List<(string, object)>
-        {
-                (FactKeys.WorldHas(recipe.OutputType), (FactValue)true),
-                (FactKeys.NearTarget(recipe.OutputType), (FactValue)true),
-                (FactKeys.WorldCount(recipe.OutputType), (Func<State, FactValue>)(ctx =>
+            var effects = new List<(string, object)>
             {
-                    if (ctx.TryGet(FactKeys.WorldCount(recipe.OutputType), out var existing))
-                    return existing.IntValue + 1;
-                return 1;
-            }))
-        };
+                (FactKeys.WorldHas(recipe.OutputTag), (FactValue)true),
+                (FactKeys.NearTarget(recipe.OutputTag), (FactValue)true),
+                (FactKeys.WorldCount(recipe.OutputTag), (Func<State, FactValue>)(ctx =>
+                {
+                    if (ctx.TryGet(FactKeys.WorldCount(recipe.OutputTag), out var existing))
+                        return existing.IntValue + 1;
+                    return 1;
+                }))
+            };
 
             foreach (var kvp in recipe.Ingredients)
             {
@@ -378,20 +376,20 @@ public class GenericStepFactory : IStepFactory
             }
 
             // For campfire, we add the legacy key just in case
-            if (recipe.OutputType == TargetType.Campfire)
+            if (recipe.OutputTag == Tags.Campfire)
             {
                 effects.Add(("HasCampfire", (FactValue)true));
             }
 
             var config = new StepConfig(recipe.Name)
-        {
+            {
                 ActionFactory = () => new BuildItemAction(recipe),
-            Preconditions = pre,
-            Effects = effects,
-            CostFactory = _ => 10.0
-        };
+                Preconditions = pre,
+                Effects = effects,
+                CostFactory = _ => 10.0
+            };
 
-        _stepConfigs.Add(config);
+            _stepConfigs.Add(config);
         }
     }
 

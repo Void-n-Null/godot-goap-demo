@@ -38,7 +38,6 @@ public static class Nature
             return new IComponent[]
             {
                 health,
-                new TargetComponent(TargetType.Tree),
                 new LootDropComponent 
                 { 
                     Drops = 

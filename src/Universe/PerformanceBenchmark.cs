@@ -44,27 +44,27 @@ public partial class PerformanceBenchmark : Node
 	{
 		new("BedNearby", state =>
 		{
-			state.Set(FactKeys.WorldHas(TargetType.Bed), true);
-			state.Set(FactKeys.WorldCount(TargetType.Bed), 1);
+			state.Set(FactKeys.WorldHas(Tags.Bed), true);
+			state.Set(FactKeys.WorldCount(Tags.Bed), 1);
 			state.Set("IsSleepy", true);
 			// Need to walk to an existing bed.
 		}),
 		new("InventoryHasSticks", state =>
 		{
-			state.Set(FactKeys.AgentHas(TargetType.Stick), true);
-			state.Set(FactKeys.AgentCount(TargetType.Stick), 4);
+			state.Set(FactKeys.AgentHas(Tags.Stick), true);
+			state.Set(FactKeys.AgentCount(Tags.Stick), 4);
 			state.Set("IsSleepy", true);
 		}),
 		new("GatherDroppedSticks", state =>
 		{
-			state.Set(FactKeys.WorldHas(TargetType.Stick), true);
-			state.Set(FactKeys.WorldCount(TargetType.Stick), 8);
+			state.Set(FactKeys.WorldHas(Tags.Stick), true);
+			state.Set(FactKeys.WorldCount(Tags.Stick), 8);
 			state.Set("IsSleepy", true);
 		}),
 		new("FullPipelineFromTrees", state =>
 		{
-			state.Set(FactKeys.WorldHas(TargetType.Tree), true);
-			state.Set(FactKeys.WorldCount(TargetType.Tree), 40);
+			state.Set(FactKeys.WorldHas(Tags.Tree), true);
+			state.Set(FactKeys.WorldCount(Tags.Tree), 40);
 			state.Set("IsSleepy", true);
 		})
 	};
@@ -384,7 +384,7 @@ public partial class PerformanceBenchmark : Node
 	private static State BuildStayWarmGoalState()
 	{
 		var goal = new State();
-		goal.Set(FactKeys.NearTarget(TargetType.Campfire), true);
+		goal.Set(FactKeys.NearTarget(Tags.Campfire), true);
 		return goal;
 	}
 
@@ -399,36 +399,36 @@ public partial class PerformanceBenchmark : Node
 	{
 		var state = new State();
 		state.Set("IsSleepy", true);
-		state.Set(FactKeys.NearTarget(TargetType.Bed), false);
-		state.Set(FactKeys.WorldHas(TargetType.Bed), false);
-		state.Set(FactKeys.WorldCount(TargetType.Bed), 0);
-		state.Set(FactKeys.AgentHas(TargetType.Stick), false);
-		state.Set(FactKeys.AgentCount(TargetType.Stick), 0);
-		state.Set(FactKeys.WorldHas(TargetType.Stick), false);
-		state.Set(FactKeys.WorldCount(TargetType.Stick), 0);
-		state.Set(FactKeys.WorldHas(TargetType.Tree), false);
-		state.Set(FactKeys.WorldCount(TargetType.Tree), 0);
-		state.Set(FactKeys.NearTarget(TargetType.Tree), false);
-		state.Set(FactKeys.NearTarget(TargetType.Stick), false);
+		state.Set(FactKeys.NearTarget(Tags.Bed), false);
+		state.Set(FactKeys.WorldHas(Tags.Bed), false);
+		state.Set(FactKeys.WorldCount(Tags.Bed), 0);
+		state.Set(FactKeys.AgentHas(Tags.Stick), false);
+		state.Set(FactKeys.AgentCount(Tags.Stick), 0);
+		state.Set(FactKeys.WorldHas(Tags.Stick), false);
+		state.Set(FactKeys.WorldCount(Tags.Stick), 0);
+		state.Set(FactKeys.WorldHas(Tags.Tree), false);
+		state.Set(FactKeys.WorldCount(Tags.Tree), 0);
+		state.Set(FactKeys.NearTarget(Tags.Tree), false);
+		state.Set(FactKeys.NearTarget(Tags.Stick), false);
 		return state;
 	}
 
 	private static State CreateBaseStayWarmState()
 	{
 		var state = new State();
-		state.Set(FactKeys.NearTarget(TargetType.Campfire), false);
-		state.Set(FactKeys.WorldHas(TargetType.Campfire), false);
-		state.Set(FactKeys.WorldCount(TargetType.Campfire), 0);
+		state.Set(FactKeys.NearTarget(Tags.Campfire), false);
+		state.Set(FactKeys.WorldHas(Tags.Campfire), false);
+		state.Set(FactKeys.WorldCount(Tags.Campfire), 0);
 		
 		// Campfire needs 2 sticks.
-		state.Set(FactKeys.AgentHas(TargetType.Stick), false);
-		state.Set(FactKeys.AgentCount(TargetType.Stick), 0);
-		state.Set(FactKeys.WorldHas(TargetType.Stick), false);
-		state.Set(FactKeys.WorldCount(TargetType.Stick), 0);
-		state.Set(FactKeys.WorldHas(TargetType.Tree), false);
-		state.Set(FactKeys.WorldCount(TargetType.Tree), 0);
-		state.Set(FactKeys.NearTarget(TargetType.Tree), false);
-		state.Set(FactKeys.NearTarget(TargetType.Stick), false);
+		state.Set(FactKeys.AgentHas(Tags.Stick), false);
+		state.Set(FactKeys.AgentCount(Tags.Stick), 0);
+		state.Set(FactKeys.WorldHas(Tags.Stick), false);
+		state.Set(FactKeys.WorldCount(Tags.Stick), 0);
+		state.Set(FactKeys.WorldHas(Tags.Tree), false);
+		state.Set(FactKeys.WorldCount(Tags.Tree), 0);
+		state.Set(FactKeys.NearTarget(Tags.Tree), false);
+		state.Set(FactKeys.NearTarget(Tags.Stick), false);
 		return state;
 	}
 
@@ -436,9 +436,9 @@ public partial class PerformanceBenchmark : Node
 	{
 		var state = new State();
 		state.Set("IsHungry", true);
-		state.Set(FactKeys.NearTarget(TargetType.Food), false);
-		state.Set(FactKeys.WorldHas(TargetType.Food), false);
-		state.Set(FactKeys.WorldCount(TargetType.Food), 0);
+		state.Set(FactKeys.NearTarget(Tags.Food), false);
+		state.Set(FactKeys.WorldHas(Tags.Food), false);
+		state.Set(FactKeys.WorldCount(Tags.Food), 0);
 		return state;
 	}
 
@@ -449,26 +449,26 @@ public partial class PerformanceBenchmark : Node
 		// Randomize agent inventory and proximity.
 		bool agentHasStick = random.NextDouble() < 0.45;
 		int agentStickCount = agentHasStick ? random.Next(1, 6) : 0;
-		state.Set(FactKeys.AgentHas(TargetType.Stick), agentHasStick);
-		state.Set(FactKeys.AgentCount(TargetType.Stick), agentStickCount);
-		state.Set(FactKeys.NearTarget(TargetType.Stick), random.NextDouble() < 0.35);
-		state.Set(FactKeys.NearTarget(TargetType.Tree), random.NextDouble() < 0.35);
+		state.Set(FactKeys.AgentHas(Tags.Stick), agentHasStick);
+		state.Set(FactKeys.AgentCount(Tags.Stick), agentStickCount);
+		state.Set(FactKeys.NearTarget(Tags.Stick), random.NextDouble() < 0.35);
+		state.Set(FactKeys.NearTarget(Tags.Tree), random.NextDouble() < 0.35);
 
 		// Randomize world availability for primary resources.
 		// Ensure sticks are more available (beds need 4 sticks vs campfire's 2)
 		bool worldHasSticks = random.NextDouble() < 0.85;
-		state.Set(FactKeys.WorldHas(TargetType.Stick), worldHasSticks);
-		state.Set(FactKeys.WorldCount(TargetType.Stick), worldHasSticks ? random.Next(4, 20) : 0);
+		state.Set(FactKeys.WorldHas(Tags.Stick), worldHasSticks);
+		state.Set(FactKeys.WorldCount(Tags.Stick), worldHasSticks ? random.Next(4, 20) : 0);
 
 		// Trees should be almost always available as the fallback resource
 		bool worldHasTrees = random.NextDouble() < 0.99;
-		state.Set(FactKeys.WorldHas(TargetType.Tree), worldHasTrees);
-		state.Set(FactKeys.WorldCount(TargetType.Tree), worldHasTrees ? random.Next(20, 100) : 0);
+		state.Set(FactKeys.WorldHas(Tags.Tree), worldHasTrees);
+		state.Set(FactKeys.WorldCount(Tags.Tree), worldHasTrees ? random.Next(20, 100) : 0);
 
 		bool worldHasBed = random.NextDouble() < 0.3;
-		state.Set(FactKeys.WorldHas(TargetType.Bed), worldHasBed);
-		state.Set(FactKeys.WorldCount(TargetType.Bed), worldHasBed ? random.Next(1, 3) : 0);
-		state.Set(FactKeys.NearTarget(TargetType.Bed), worldHasBed && random.NextDouble() < 0.2);
+		state.Set(FactKeys.WorldHas(Tags.Bed), worldHasBed);
+		state.Set(FactKeys.WorldCount(Tags.Bed), worldHasBed ? random.Next(1, 3) : 0);
+		state.Set(FactKeys.NearTarget(Tags.Bed), worldHasBed && random.NextDouble() < 0.2);
 
 		// Inject per-agent identity to avoid clone states.
 		state.Set(FactKeys.AgentId, agentId);
@@ -484,23 +484,23 @@ public partial class PerformanceBenchmark : Node
 		// Similar stick distribution as sleep, but campfire needs fewer (2).
 		bool agentHasStick = random.NextDouble() < 0.45;
 		int agentStickCount = agentHasStick ? random.Next(1, 4) : 0;
-		state.Set(FactKeys.AgentHas(TargetType.Stick), agentHasStick);
-		state.Set(FactKeys.AgentCount(TargetType.Stick), agentStickCount);
-		state.Set(FactKeys.NearTarget(TargetType.Stick), random.NextDouble() < 0.35);
-		state.Set(FactKeys.NearTarget(TargetType.Tree), random.NextDouble() < 0.35);
+		state.Set(FactKeys.AgentHas(Tags.Stick), agentHasStick);
+		state.Set(FactKeys.AgentCount(Tags.Stick), agentStickCount);
+		state.Set(FactKeys.NearTarget(Tags.Stick), random.NextDouble() < 0.35);
+		state.Set(FactKeys.NearTarget(Tags.Tree), random.NextDouble() < 0.35);
 
 		bool worldHasSticks = random.NextDouble() < 0.85;
-		state.Set(FactKeys.WorldHas(TargetType.Stick), worldHasSticks);
-		state.Set(FactKeys.WorldCount(TargetType.Stick), worldHasSticks ? random.Next(2, 15) : 0);
+		state.Set(FactKeys.WorldHas(Tags.Stick), worldHasSticks);
+		state.Set(FactKeys.WorldCount(Tags.Stick), worldHasSticks ? random.Next(2, 15) : 0);
 
 		bool worldHasTrees = random.NextDouble() < 0.99;
-		state.Set(FactKeys.WorldHas(TargetType.Tree), worldHasTrees);
-		state.Set(FactKeys.WorldCount(TargetType.Tree), worldHasTrees ? random.Next(10, 50) : 0);
+		state.Set(FactKeys.WorldHas(Tags.Tree), worldHasTrees);
+		state.Set(FactKeys.WorldCount(Tags.Tree), worldHasTrees ? random.Next(10, 50) : 0);
 
 		bool worldHasCampfire = random.NextDouble() < 0.3;
-		state.Set(FactKeys.WorldHas(TargetType.Campfire), worldHasCampfire);
-		state.Set(FactKeys.WorldCount(TargetType.Campfire), worldHasCampfire ? random.Next(1, 3) : 0);
-		state.Set(FactKeys.NearTarget(TargetType.Campfire), worldHasCampfire && random.NextDouble() < 0.2);
+		state.Set(FactKeys.WorldHas(Tags.Campfire), worldHasCampfire);
+		state.Set(FactKeys.WorldCount(Tags.Campfire), worldHasCampfire ? random.Next(1, 3) : 0);
+		state.Set(FactKeys.NearTarget(Tags.Campfire), worldHasCampfire && random.NextDouble() < 0.2);
 
 		state.Set(FactKeys.AgentId, agentId);
 		state.Set(FactKeys.Position, random.Next(-10_000, 10_001));
@@ -514,9 +514,9 @@ public partial class PerformanceBenchmark : Node
 
 		// Food availability
 		bool worldHasFood = random.NextDouble() < 0.90; // Food is fairly common for this test
-		state.Set(FactKeys.WorldHas(TargetType.Food), worldHasFood);
-		state.Set(FactKeys.WorldCount(TargetType.Food), worldHasFood ? random.Next(1, 10) : 0);
-		state.Set(FactKeys.NearTarget(TargetType.Food), worldHasFood && random.NextDouble() < 0.4);
+		state.Set(FactKeys.WorldHas(Tags.Food), worldHasFood);
+		state.Set(FactKeys.WorldCount(Tags.Food), worldHasFood ? random.Next(1, 10) : 0);
+		state.Set(FactKeys.NearTarget(Tags.Food), worldHasFood && random.NextDouble() < 0.4);
 
 		state.Set(FactKeys.AgentId, agentId);
 		state.Set(FactKeys.Position, random.Next(-10_000, 10_001));

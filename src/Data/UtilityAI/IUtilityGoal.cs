@@ -1,7 +1,5 @@
 using Game.Data;
-using Game.Data.Components;
 using Game.Data.GOAP;
-using TargetType = Game.Data.Components.TargetType;
 
 namespace Game.Data.UtilityAI;
 
@@ -48,13 +46,13 @@ public interface IUtilityGoalCooldowns
 }
 
 /// <summary>
-/// Optional contract for goals that care about spawn/despawn events of specific target types
+/// Optional contract for goals that care about spawn/despawn events of specific target tags
 /// beyond those explicitly encoded in their goal states.
 /// </summary>
-public interface IUtilityGoalTargetInterest
+public interface IUtilityGoalTagInterest
 {
     /// <summary>
-    /// Returns true if the given target type should trigger a re-evaluation for this goal.
+    /// Returns true if the given tag should trigger a re-evaluation for this goal.
     /// </summary>
-    bool IsTargetTypeRelevant(TargetType targetType);
+    bool IsTargetTagRelevant(Tag tag);
 }

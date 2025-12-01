@@ -10,35 +10,33 @@ public static class Food
 		name: "BaseFood",
 		addTags: [ Tags.Food ],
 		addComponents: () => [
-			new FoodData(),
-			new TargetComponent(TargetType.Food)
+			new FoodData()
 		]
-
 	);
 
 	public static readonly EntityBlueprint RawBeef = BaseFood.Derive(
 		name: "Raw Beef",
+		addTags: [ Tags.RawBeef ],
 		addMutators: [
 			EntityBlueprint.Mutate<VisualComponent>((v) => v.PendingSpritePath = "res://textures/RawBeef.png"),
 			EntityBlueprint.Mutate<FoodData>((fd) => {
 				fd.CookedVariant = Steak;
 				fd.CookTime = 5.0f; // Faster cook time for demo
 				fd.HungerRestoredOnConsumption = 10;
-			}),
-			EntityBlueprint.Mutate<TargetComponent>(tc => tc.Target = TargetType.RawBeef)
+			})
 		]
 	);
 
 	public static readonly EntityBlueprint Steak = BaseFood.Derive(
 		name: "Steak",
+		addTags: [ Tags.Steak ],
 		addMutators: [
 			EntityBlueprint.Mutate<VisualComponent>((v) => v.PendingSpritePath = "res://textures/Steak.png"),
 			EntityBlueprint.Mutate<FoodData>((fd) => {
 				fd.RawVariant = RawBeef;
 				fd.IsCooked = true;
 				fd.HungerRestoredOnConsumption = 30; // Better value
-			}),
-			EntityBlueprint.Mutate<TargetComponent>(tc => tc.Target = TargetType.Steak)
+			})
 		]
 	);
 

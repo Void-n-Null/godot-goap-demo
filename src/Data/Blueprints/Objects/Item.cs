@@ -14,9 +14,7 @@ public static class Items
 
     public static readonly EntityBlueprint Stick = BaseItem.Derive(
         name: "Stick",
-        addComponents: () => [
-            new TargetComponent(TargetType.Stick),
-        ],
+        addTags: [TG.Stick],
         addMutators: [
             EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = "res://textures/Stick.png")
         ]

@@ -8,7 +8,6 @@ using Game.Universe;
 using System.Threading.Tasks;
 using Game.Data.UtilityAI;
 using Game.Utils;
-using TargetType = Game.Data.Components.TargetType;
 
 namespace Game.Data.Components;
 
@@ -36,8 +35,8 @@ public class AIGoalExecutor : IActiveComponent
     private int _consecutiveFailures;
     private const int MAX_IMMEDIATE_RETRIES = 2;
 
-    private static readonly TargetType[] _cachedTargetTypes = (TargetType[])Enum.GetValues(typeof(TargetType));
-    private static readonly string[] _cachedTargetTypeStrings;
+    private static readonly Tag[] _cachedTargetTags = Tags.TargetTags;
+    private static readonly string[] _cachedTargetTagStrings;
     private static readonly int[] _nearFactIds;
     private static readonly int[] _worldCountFactIds;
     private static readonly int[] _worldHasFactIds;
@@ -69,29 +68,29 @@ public class AIGoalExecutor : IActiveComponent
 
     static AIGoalExecutor()
     {
-        _cachedTargetTypeStrings = new string[_cachedTargetTypes.Length];
-        _nearFactIds = new int[_cachedTargetTypes.Length];
-        _worldCountFactIds = new int[_cachedTargetTypes.Length];
-        _worldHasFactIds = new int[_cachedTargetTypes.Length];
-        _agentCountFactIds = new int[_cachedTargetTypes.Length];
-        _agentHasFactIds = new int[_cachedTargetTypes.Length];
-        _distanceFactIds = new int[_cachedTargetTypes.Length];
+        _cachedTargetTagStrings = new string[_cachedTargetTags.Length];
+        _nearFactIds = new int[_cachedTargetTags.Length];
+        _worldCountFactIds = new int[_cachedTargetTags.Length];
+        _worldHasFactIds = new int[_cachedTargetTags.Length];
+        _agentCountFactIds = new int[_cachedTargetTags.Length];
+        _agentHasFactIds = new int[_cachedTargetTags.Length];
+        _distanceFactIds = new int[_cachedTargetTags.Length];
         HungerFactId = FactRegistry.GetId("Hunger");
         IsHungryFactId = FactRegistry.GetId("IsHungry");
         SleepinessFactId = FactRegistry.GetId("Sleepiness");
         IsSleepyFactId = FactRegistry.GetId("IsSleepy");
 
-        for (int i = 0; i < _cachedTargetTypes.Length; i++)
+        for (int i = 0; i < _cachedTargetTags.Length; i++)
         {
-            string typeName = _cachedTargetTypes[i].ToString();
-            _cachedTargetTypeStrings[i] = typeName;
-            var type = _cachedTargetTypes[i];
-            _nearFactIds[i] = FactRegistry.GetId(FactKeys.NearTarget(type));
-            _worldCountFactIds[i] = FactRegistry.GetId(FactKeys.WorldCount(type));
-            _worldHasFactIds[i] = FactRegistry.GetId(FactKeys.WorldHas(type));
-            _agentCountFactIds[i] = FactRegistry.GetId(FactKeys.AgentCount(type));
-            _agentHasFactIds[i] = FactRegistry.GetId(FactKeys.AgentHas(type));
-            _distanceFactIds[i] = FactRegistry.GetId($"Distance_To_{type}");
+            string tagName = _cachedTargetTags[i].ToString();
+            _cachedTargetTagStrings[i] = tagName;
+            var tag = _cachedTargetTags[i];
+            _nearFactIds[i] = FactRegistry.GetId(FactKeys.NearTarget(tag));
+            _worldCountFactIds[i] = FactRegistry.GetId(FactKeys.WorldCount(tag));
+            _worldHasFactIds[i] = FactRegistry.GetId(FactKeys.WorldHas(tag));
+            _agentCountFactIds[i] = FactRegistry.GetId(FactKeys.AgentCount(tag));
+            _agentHasFactIds[i] = FactRegistry.GetId(FactKeys.AgentHas(tag));
+            _distanceFactIds[i] = FactRegistry.GetId($"Distance_To_{tag}");
         }
     }
 
@@ -301,9 +300,9 @@ public class AIGoalExecutor : IActiveComponent
     public void OnStart()
     {
         _cachedState ??= new State();
-        _proximityNear ??= new bool[_cachedTargetTypes.Length];
-        _availabilityCounts ??= new int[_cachedTargetTypes.Length];
-        _nearestDistances ??= new float[_cachedTargetTypes.Length];
+        _proximityNear ??= new bool[_cachedTargetTags.Length];
+        _availabilityCounts ??= new int[_cachedTargetTags.Length];
+        _nearestDistances ??= new float[_cachedTargetTags.Length];
         SubscribeToWorldEvents();
     }
 
@@ -327,13 +326,13 @@ public class AIGoalExecutor : IActiveComponent
         // We can iterate key facts we care about.
 
         var keyFacts = new[] {
-            FactKeys.AgentCount(TargetType.Stick),
-            FactKeys.WorldCount(TargetType.Stick),
-            FactKeys.WorldHas(TargetType.Stick),
-            FactKeys.WorldCount(TargetType.Tree),
-            FactKeys.WorldHas(TargetType.Tree),
-            FactKeys.WorldCount(TargetType.Food),
-            FactKeys.WorldHas(TargetType.Food),
+            FactKeys.AgentCount(Tags.Stick),
+            FactKeys.WorldCount(Tags.Stick),
+            FactKeys.WorldHas(Tags.Stick),
+            FactKeys.WorldCount(Tags.Tree),
+            FactKeys.WorldHas(Tags.Tree),
+            FactKeys.WorldCount(Tags.Food),
+            FactKeys.WorldHas(Tags.Food),
             "Hunger",
             "IsSleepy"
         };
@@ -385,8 +384,17 @@ public class AIGoalExecutor : IActiveComponent
     private void OnWorldTargetEntityChanged(Entity entity)
     {
         if (entity == null) return;
-        // Fast check using new HasComponent logic
-        if (!entity.HasComponent<TargetComponent>()) return;
+        // Fast check: does entity have any target tag?
+        bool hasTargetTag = false;
+        foreach (var tag in _cachedTargetTags)
+        {
+            if (entity.HasTag(tag))
+            {
+                hasTargetTag = true;
+                break;
+            }
+        }
+        if (!hasTargetTag) return;
 
         // Ignore far away events so one new campfire doesn't reset the entire population
         if (Entity.TryGetComponent<TransformComponent2D>(out var selfTransform) &&
@@ -398,11 +406,19 @@ public class AIGoalExecutor : IActiveComponent
             }
         }
 
-        // Only force replan if the event is relevant to our current goal
-        if (!entity.TryGetComponent<TargetComponent>(out var targetComp)) return;
+        // Find which target tag this entity has (for goal relevance check)
+        Tag entityTag = default;
+        foreach (var tag in _cachedTargetTags)
+        {
+            if (entity.HasTag(tag))
+            {
+                entityTag = tag;
+                break;
+            }
+        }
 
         var currentGoalState = _currentGoal?.GetGoalState(Entity);
-        if (currentGoalState != null && !GoalReferencesTarget(currentGoalState, targetComp.Target))
+        if (currentGoalState != null && !GoalReferencesTag(currentGoalState, entityTag))
         {
             return;
         }
@@ -423,16 +439,16 @@ public class AIGoalExecutor : IActiveComponent
         }
     }
 
-    private bool GoalReferencesTarget(State goalState, TargetType targetType)
+    private bool GoalReferencesTag(State goalState, Tag tag)
     {
-        if (_currentGoal is IUtilityGoalTargetInterest interest && interest.IsTargetTypeRelevant(targetType))
+        if (_currentGoal is IUtilityGoalTagInterest interest && interest.IsTargetTagRelevant(tag))
         {
             return true;
         }
 
-        var nearKey = FactKeys.NearTarget(targetType);
-        var worldHasKey = FactKeys.WorldHas(targetType);
-        var worldCountKey = FactKeys.WorldCount(targetType);
+        var nearKey = FactKeys.NearTarget(tag);
+        var worldHasKey = FactKeys.WorldHas(tag);
+        var worldCountKey = FactKeys.WorldCount(tag);
 
         return goalState.TryGet(nearKey, out _) ||
                goalState.TryGet(worldHasKey, out _) ||
@@ -484,56 +500,70 @@ public class AIGoalExecutor : IActiveComponent
             _nearestDistances[i] = float.MaxValue;
         }
 
-        // Optimized Query: Use HasComponent (O(1) for sealed)
+        // Query all entities and filter by tags
         var nearbyEntities = Universe.EntityManager.Instance?.SpatialPartition?.QueryCircle(
             agentPos,
             searchRadius,
-            e => e.HasComponent<TargetComponent>(),
+            e => HasAnyTargetTag(e),
             MAX_PROXIMITY_RESULTS);
 
         if (nearbyEntities != null)
         {
-            var reservationManager = Universe.ResourceReservationManager.Instance;
-            int targetTypeCount = _cachedTargetTypes.Length;
+            int tagCount = _cachedTargetTags.Length;
             const float nearDistSq = 64f * 64f;
 
-            // Use indexed access to avoid enumerator allocation? List<T>.Enumerator is struct, so it's fine.
             foreach (var entity in nearbyEntities)
             {
-                if (!entity.TryGetComponent<TargetComponent>(out var tc)) continue;
-
-                // Optimization: Map Enum directly to index
-                int typeIndex = (int)tc.Target;
-                if (typeIndex < 0 || typeIndex >= targetTypeCount) continue;
+                // Find which tag index this entity matches
+                int tagIndex = GetTagIndex(entity);
+                if (tagIndex < 0 || tagIndex >= tagCount) continue;
 
                 // Optimization: Use squared distance to avoid Sqrt until necessary
                 float distSq = agentPos.DistanceSquaredTo(entity.Transform?.Position ?? agentPos);
 
                 if (distSq <= nearDistSq)
                 {
-                    _proximityNear[typeIndex] = true;
+                    _proximityNear[tagIndex] = true;
                 }
 
-                // HOT PATH OPTIMIZATION: Uses Entity.ReservedByAgentId (O(1))
-                bool isAvailable = reservationManager.IsAvailableFor(entity, agent);
-                if (isAvailable && _availabilityCounts[typeIndex] < MAX_AVAILABLE_PER_TYPE)
+                // Count ALL entities for planning purposes, regardless of reservation status.
+                // The planner should see the full world state - actions handle contention at runtime.
+                // This prevents bizarre long plans when other agents have reserved resources.
+                if (_availabilityCounts[tagIndex] < MAX_AVAILABLE_PER_TYPE)
                 {
-                    _availabilityCounts[typeIndex]++;
+                    _availabilityCounts[tagIndex]++;
                 }
 
                 // Only Sqrt if we have a new candidate for nearest
-                // Use distSq for comparison
-                if (distSq < _nearestDistances[typeIndex] * _nearestDistances[typeIndex])
+                if (distSq < _nearestDistances[tagIndex] * _nearestDistances[tagIndex])
                 {
-                    _nearestDistances[typeIndex] = MathF.Sqrt(distSq);
+                    _nearestDistances[tagIndex] = MathF.Sqrt(distSq);
                 }
             }
         }
     }
 
+    private static bool HasAnyTargetTag(Entity e)
+    {
+        foreach (var tag in _cachedTargetTags)
+        {
+            if (e.HasTag(tag)) return true;
+        }
+        return false;
+    }
+
+    private static int GetTagIndex(Entity e)
+    {
+        for (int i = 0; i < _cachedTargetTags.Length; i++)
+        {
+            if (e.HasTag(_cachedTargetTags[i])) return i;
+        }
+        return -1;
+    }
+
     private void ApplyProximityFacts(State state)
     {
-        for (int i = 0; i < _cachedTargetTypes.Length; i++)
+        for (int i = 0; i < _cachedTargetTags.Length; i++)
         {
             state.Set(_nearFactIds[i], _proximityNear[i]);
             state.Set(_worldCountFactIds[i], _availabilityCounts[i]);
@@ -548,9 +578,9 @@ public class AIGoalExecutor : IActiveComponent
 
     private void AddNPCFacts(State state, NPCData npcData)
     {
-        for (int i = 0; i < _cachedTargetTypes.Length; i++)
+        for (int i = 0; i < _cachedTargetTags.Length; i++)
         {
-            int agentCount = npcData.Resources.GetValueOrDefault(_cachedTargetTypes[i], 0);
+            int agentCount = npcData.Resources.GetValueOrDefault(_cachedTargetTags[i], 0);
 
             state.Set(_agentCountFactIds[i], agentCount);
             state.Set(_agentHasFactIds[i], agentCount > 0);

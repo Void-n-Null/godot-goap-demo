@@ -16,7 +16,7 @@ namespace Game.Universe;
 public partial class GameManager : SingletonNode<GameManager>
 {
     [Export] public bool DebugMode = false;
-    [Export] public string StartingScenario = "SurvivalCooking";
+    [Export] public string StartingScenario = "ThreePeopleManyFood";
     /// <summary>
     /// Event that fires every physics tick. Subscribe to this to receive tick updates.
     /// </summary>

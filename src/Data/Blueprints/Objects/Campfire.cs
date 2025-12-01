@@ -8,9 +8,8 @@ public static class Campfire
 {
     public static readonly EntityBlueprint BaseCampfire = Primordial.EmbodiedEntity.Derive(
         name: "BaseCampfire",
-        addTags: [ Tags.Campfire, Tags.HeatSource, Tags.Flammable ],
+        addTags: [ Tags.Campfire, Tags.HeatSource, Tags.Flammable, Tags.CookingStation ],
         addComponents: () => [
-            new TargetComponent(TargetType.Campfire),
             new CookingStationComponent(),
             new HealthComponent(maxHealth: 100), // Can be extinguished/destroyed
             new FireVisualComponent(

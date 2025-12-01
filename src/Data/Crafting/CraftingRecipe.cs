@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Game.Data.Components;
 using Game.Data.Blueprints;
 
 namespace Game.Data.Crafting;
@@ -15,9 +14,9 @@ public class CraftingRecipe
     public string Name { get; set; }
 
     /// <summary>
-    /// The TargetType of the resulting entity
+    /// The Tag identifying the resulting entity type
     /// </summary>
-    public TargetType OutputType { get; set; }
+    public Tag OutputTag { get; set; }
 
     /// <summary>
     /// The Blueprint to spawn
@@ -25,9 +24,9 @@ public class CraftingRecipe
     public EntityBlueprint Blueprint { get; set; }
 
     /// <summary>
-    /// Resources required to build
+    /// Resources required to build (keyed by Tag)
     /// </summary>
-    public Dictionary<TargetType, int> Ingredients { get; set; } = new();
+    public Dictionary<Tag, int> Ingredients { get; set; } = new();
 
     /// <summary>
     /// Time in seconds to build
@@ -35,7 +34,7 @@ public class CraftingRecipe
     public float BuildTime { get; set; } = 3.0f;
 
     /// <summary>
-    /// If > 0, prevents building if another entity of OutputType is within this radius.
+    /// If > 0, prevents building if another entity with OutputTag is within this radius.
     /// </summary>
     public float SpacingRadius { get; set; } = 0f;
 }

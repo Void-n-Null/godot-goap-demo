@@ -1,4 +1,3 @@
-using Game.Data.Components;
 using Game.Utils;
 using Godot;
 
@@ -6,17 +5,17 @@ namespace Game.Data.GOAP.GenericActions;
 
 public class ConsumeInventoryItemAction : IAction
 {
-    private readonly TargetType _itemType;
+    private readonly Tag _itemTag;
     private readonly float _duration;
     private float _timer;
     private bool _complete;
     private bool _failed;
 
-    public string Name => $"Consume {_itemType}";
+    public string Name => $"Consume {_itemTag}";
 
-    public ConsumeInventoryItemAction(TargetType itemType, float duration = 2.0f)
+    public ConsumeInventoryItemAction(Tag itemTag, float duration = 2.0f)
     {
-        _itemType = itemType;
+        _itemTag = itemTag;
         _duration = duration;
     }
 
@@ -28,9 +27,9 @@ public class ConsumeInventoryItemAction : IAction
         
         if (agent.TryGetComponent<NPCData>(out var data))
         {
-            if (!data.Resources.ContainsKey(_itemType) || data.Resources[_itemType] <= 0)
+            if (!data.Resources.ContainsKey(_itemTag) || data.Resources[_itemTag] <= 0)
             {
-                Fail($"ConsumeInventoryItemAction: Agent does not have {_itemType}!");
+                Fail($"ConsumeInventoryItemAction: Agent does not have {_itemTag}!");
             }
         }
     }
@@ -45,14 +44,15 @@ public class ConsumeInventoryItemAction : IAction
         {
             if (agent.TryGetComponent<NPCData>(out var data))
             {
-                if (data.Resources.TryGetValue(_itemType, out int count) && count > 0)
+                if (data.Resources.TryGetValue(_itemTag, out int count) && count > 0)
                 {
-                    data.Resources[_itemType] = count - 1;
+                    data.Resources[_itemTag] = count - 1;
                     
-                    int restored = _itemType == TargetType.Steak ? 30 : 5;
+                    // Steak is more nutritious, but raw beef still works
+                    int restored = _itemTag == Tags.Steak ? 40 : 25;
                     data.Hunger = Mathf.Max(0, data.Hunger - restored);
                     
-                    LM.Info($"Consumed {_itemType} from inventory. Hunger: {data.Hunger}");
+                    LM.Info($"Consumed {_itemTag} from inventory. Hunger: {data.Hunger}");
                     _complete = true;
                     return ActionStatus.Succeeded;
                 }

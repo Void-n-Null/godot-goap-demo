@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using Game.Data.Blueprints.Objects;
-using Game.Data.Components;
 
 namespace Game.Data.Crafting;
 
@@ -19,11 +18,11 @@ public static class CraftingRegistry
         Recipes.Add(new CraftingRecipe
         {
             Name = "BuildCampfire",
-            OutputType = TargetType.Campfire,
+            OutputTag = Tags.Campfire,
             Blueprint = Campfire.SimpleCampfire,
-            Ingredients = new Dictionary<TargetType, int>
+            Ingredients = new Dictionary<Tag, int>
             {
-                { TargetType.Stick, 2 }
+                { Tags.Stick, 2 }
             },
             BuildTime = 5.0f,
             SpacingRadius = 1000f
@@ -35,11 +34,11 @@ public static class CraftingRegistry
         Recipes.Add(new CraftingRecipe
         {
             Name = "BuildBed",
-            OutputType = TargetType.Bed,
+            OutputTag = Tags.Bed,
             Blueprint = Furniture.Bed,
-            Ingredients = new Dictionary<TargetType, int>
+            Ingredients = new Dictionary<Tag, int>
             {
-                { TargetType.Stick, 4 }
+                { Tags.Stick, 4 }
             },
             BuildTime = 5.0f,
             SpacingRadius = 200f

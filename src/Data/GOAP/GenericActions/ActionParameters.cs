@@ -41,10 +41,10 @@ public class EntityFinderConfig
     }
 
     /// <summary>
-    /// Create finder for entities with a specific TargetType
+    /// Create finder for entities with a specific Tag
     /// </summary>
-    public static EntityFinderConfig ByTargetType(
-        TargetType targetType,
+    public static EntityFinderConfig ByTag(
+        Tag tag,
         float radius = float.MaxValue,
         bool requireUnreserved = false,
         bool shouldReserve = false
@@ -52,7 +52,7 @@ public class EntityFinderConfig
     {
         return new EntityFinderConfig
         {
-            Filter = e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == targetType,
+            Filter = e => e.HasTag(tag),
             SearchRadius = radius,
             RequireUnreserved = requireUnreserved,
             ShouldReserve = shouldReserve
@@ -72,7 +72,7 @@ public class InteractionEffectConfig
     /// <summary>
     /// Pick up item into inventory
     /// </summary>
-    public static InteractionEffectConfig PickUp(TargetType resourceType)
+    public static InteractionEffectConfig PickUp(Tag resourceTag)
     {
         return new InteractionEffectConfig
         {
@@ -80,8 +80,8 @@ public class InteractionEffectConfig
             {
                 if (agent.TryGetComponent<NPCData>(out var npcData))
                 {
-                    npcData.Resources[resourceType] = (npcData.Resources.TryGetValue(resourceType, out var count) ? count : 0) + 1;
-                    LM.Info($"Picked up 1 {resourceType}; total: {npcData.Resources[resourceType]}");
+                    npcData.Resources[resourceTag] = (npcData.Resources.TryGetValue(resourceTag, out var count) ? count : 0) + 1;
+                    LM.Info($"Picked up 1 {resourceTag}; total: {npcData.Resources[resourceTag]}");
                 }
             },
             DestroyTargetOnComplete = true,
@@ -105,6 +105,19 @@ public class InteractionEffectConfig
                 }
             },
             DestroyTargetOnComplete = false, // HealthComponent handles destruction
+            ReleaseReservationOnComplete = true
+        };
+    }
+    
+    /// <summary>
+    /// No effect - just complete the interaction without side effects
+    /// </summary>
+    public static InteractionEffectConfig None()
+    {
+        return new InteractionEffectConfig
+        {
+            OnComplete = null,
+            DestroyTargetOnComplete = false,
             ReleaseReservationOnComplete = true
         };
     }

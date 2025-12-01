@@ -17,7 +17,7 @@ public class GatherWoodGoal : IUtilityGoal
         if (!agent.TryGetComponent<NPCData>(out var npcData))
             return 0f;
         
-        int currentSticks = npcData.Resources.GetValueOrDefault(TargetType.Stick, 0);
+        int currentSticks = npcData.Resources.GetValueOrDefault(Tags.Stick, 0);
         
         // Already have enough sticks
         if (currentSticks >= TARGET_STICKS)
@@ -31,7 +31,7 @@ public class GatherWoodGoal : IUtilityGoal
     public State GetGoalState(Entity agent)
     {
         var s = new State();
-        s.Set(FactKeys.AgentCount(TargetType.Stick), TARGET_STICKS);
+        s.Set(FactKeys.AgentCount(Tags.Stick), TARGET_STICKS);
         return s;
     }
     
@@ -40,7 +40,7 @@ public class GatherWoodGoal : IUtilityGoal
         if (!agent.TryGetComponent<NPCData>(out var npcData))
             return false;
         
-        int currentSticks = npcData.Resources.GetValueOrDefault(TargetType.Stick, 0);
+        int currentSticks = npcData.Resources.GetValueOrDefault(Tags.Stick, 0);
         return currentSticks >= TARGET_STICKS;
     }
 }

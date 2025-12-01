@@ -60,7 +60,7 @@ public static class NPC
             // Set specific starting stats for demonstration
             EntityBlueprint.Mutate<NPCData>((npc) =>
             {
-                npc.Hunger = 0f;
+                npc.Hunger = Random.NextFloat(0f,100f);
                 npc.Thirst = 20f;
                 npc.Sleepiness = 50f;
             })

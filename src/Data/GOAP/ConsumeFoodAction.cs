@@ -22,8 +22,8 @@ public sealed class ConsumeFoodAction : IAction, IRuntimeGuard
         const float PICKUP_RADIUS = 100f;
 
         // Find nearest food that we have reserved
-        _foodTarget = ServiceLocator.EntityManager.QueryByComponent<TargetComponent>(agentPos, PICKUP_RADIUS)
-            .Where(e => e.GetComponent<TargetComponent>().Target == TargetType.Food)
+        _foodTarget = ServiceLocator.EntityManager.SpatialPartition
+            .QueryCircle(agentPos, PICKUP_RADIUS, e => e.HasTag(Tags.Food), maxResults: 10)
             .Where(e => ResourceReservationManager.Instance.IsReservedBy(e, agent))
             .FirstOrDefault();
 

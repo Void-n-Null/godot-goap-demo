@@ -130,7 +130,7 @@ public sealed class SleepInBedAction : PeriodicGuardAction
          var nearby = EntityManager.Instance?.SpatialPartition?.QueryCircle(
             transform.Position,
             128f, // Close range
-            e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Bed,
+            e => e.HasTag(Tags.Bed),
             maxResults: 1);
 
         if (nearby != null && nearby.Count > 0)
@@ -148,7 +148,7 @@ public sealed class SleepInBedAction : PeriodicGuardAction
          var nearby = EntityManager.Instance?.SpatialPartition?.QueryCircle(
             transform.Position,
             128f,
-            e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == TargetType.Bed,
+            e => e.HasTag(Tags.Bed),
             maxResults: 1);
             
         return nearby != null && nearby.Count > 0;

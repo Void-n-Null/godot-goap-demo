@@ -26,10 +26,7 @@ public static class Furniture
 
 	public static readonly EntityBlueprint Bed = BaseFurniture.Derive(
 		name: "Bed",
-		addTags: [ Tags.CanBeSleptIn ],
-		addComponents: () => [
-			new TargetComponent(TargetType.Bed)
-		],
+		addTags: [ Tags.CanBeSleptIn, Tags.Bed ],
 		addMutators: [
 			EntityBlueprint.Mutate<VisualComponent>((c) => c.PendingSpritePath = "res://textures/Bed.png")
 		]

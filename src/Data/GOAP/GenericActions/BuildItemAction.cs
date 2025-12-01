@@ -39,13 +39,13 @@ public sealed class BuildItemAction : PeriodicGuardAction
 
         if (!HasIngredients(npcData))
         {
-            Fail($"Not enough resources to build {_recipe.OutputType}!");
+            Fail($"Not enough resources to build {_recipe.OutputTag}!");
             return;
         }
 
         if (_recipe.SpacingRadius > 0 && HasItemNearby(agent))
         {
-            Fail($"Existing {_recipe.OutputType} already nearby; cannot build another.");
+            Fail($"Existing {_recipe.OutputTag} already nearby; cannot build another.");
             return;
         }
 
@@ -84,7 +84,7 @@ public sealed class BuildItemAction : PeriodicGuardAction
             );
 
             _completed = true;
-            LM.Info($"Built {_recipe.OutputType} at {transform.Position}!");
+            LM.Info($"Built {_recipe.OutputTag} at {transform.Position}!");
             return ActionStatus.Succeeded;
         }
 
@@ -158,7 +158,7 @@ public sealed class BuildItemAction : PeriodicGuardAction
         var nearby = EntityManager.Instance?.SpatialPartition?.QueryCircle(
             transform.Position,
             _recipe.SpacingRadius,
-            e => e.TryGetComponent<TargetComponent>(out var tc) && tc.Target == _recipe.OutputType,
+            e => e.HasTag(_recipe.OutputTag),
             maxResults: 1);
 
         return nearby != null && nearby.Count > 0;

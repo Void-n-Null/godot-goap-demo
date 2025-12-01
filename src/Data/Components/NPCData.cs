@@ -22,7 +22,7 @@ public class NPCData : IActiveComponent
 {
     const float DEFAULT_MAX = 100f;
 
-    public Dictionary<TargetType, int> Resources { get; } = new Dictionary<TargetType, int>();
+    public Dictionary<Tag, int> Resources { get; } = new Dictionary<Tag, int>();
     public Entity Entity { get; set; }
     public string Name { get; set; }
     public float Health { get; set; }
