@@ -39,14 +39,26 @@ public class NPCData : IActiveComponent
     public NPCGender Gender { get; set; } = NPCGender.Male;
     public NPCAgeGroup AgeGroup { get; set; } = NPCAgeGroup.Adult;
 
+    private const float HEAT_CHECK_INTERVAL = 0.333f;
+    private float _heatCheckAccumulator = HEAT_CHECK_INTERVAL;
+    private int _nearbyHeatSourceCount = 0;
+
 
     public void Update(double delta)
     {
-        // Lets look at the world! If were within 200 units of a heat source, we get warmer up to a max of 100, otherwise we get slowly colder!
-        var heatSources = Game.Universe.EntityManager.Instance.QueryByTag(Tags.HeatSource, Entity.Transform.Position, 200f);
-        foreach (var heatSource in heatSources)
+        // Throttle expensive proximity checks; reuse the last sampled heat-source count between checks.
+        _heatCheckAccumulator += (float)delta;
+        if (_heatCheckAccumulator >= HEAT_CHECK_INTERVAL)
         {
-            Temperature += (float)delta * 10f;
+            _heatCheckAccumulator = 0f;
+            var heatSources = EntityManager.Instance.QueryByTag(Tags.HeatSource, Entity.Transform.Position, 200f);
+            _nearbyHeatSourceCount = heatSources.Count;
+        }
+
+        // Warm up based on the last sampled heat-source count.
+        if (_nearbyHeatSourceCount > 0)
+        {
+            Temperature += (float)delta * 10f * _nearbyHeatSourceCount;
         }
 
         Temperature -= (float)delta * 0.2f;

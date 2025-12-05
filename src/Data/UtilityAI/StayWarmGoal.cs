@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Game.Data;
 using Game.Data.Components;
 using Game.Data.GOAP;
@@ -5,7 +7,7 @@ using Godot;
 
 namespace Game.Data.UtilityAI;
 
-public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTagInterest
+public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTagInterest, IUtilityGoalWorldEventInterest
 {
     private const float ComfortableTemperature = 70f;
     private const float CriticalTemperature = 30f;
@@ -85,4 +87,8 @@ public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTag
         // Only campfires should cause immediate replanning; harvested sticks are tracked via state updates.
         return tag == Tags.Campfire;
     }
+
+    public IEnumerable<Tag> SpawnEventTags => new[] { Tags.Campfire, Tags.HeatSource };
+
+    public IEnumerable<Tag> DespawnEventTags => [];
 }

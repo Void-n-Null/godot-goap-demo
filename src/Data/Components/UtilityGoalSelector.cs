@@ -205,11 +205,11 @@ public class UtilityGoalSelector : IActiveComponent
         // Hook up to executor events
         if (Entity.TryGetComponent(out _executor))
         {
-            _executor.OnCannotPlan += OnExecutorCannotPlan;
-            _executor.OnPlanExecutionFailed += OnExecutorPlanExecutionFailed;
-            _executor.OnPlanSucceeded += OnExecutorPlanSucceeded;
-            _executor.OnGoalSatisfied += OnExecutorGoalSatisfied;
-            _executor.OnNeedNewGoal += OnExecutorNeedNewGoal;
+            _executor.Events.CannotPlan += OnExecutorCannotPlan;
+            _executor.Events.PlanExecutionFailed += OnExecutorPlanExecutionFailed;
+            _executor.Events.PlanSucceeded += OnExecutorPlanSucceeded;
+            _executor.Events.GoalSatisfied += OnExecutorGoalSatisfied;
+            _executor.Events.NeedNewGoal += OnExecutorNeedNewGoal;
 
             // Evaluate and assign initial goal
             EvaluateAndSelectGoal();

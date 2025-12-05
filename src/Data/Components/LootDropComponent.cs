@@ -60,7 +60,8 @@ public class LootDropComponent : IComponent
             {
                 var offset = Random.InsideCircle(Vector2.Zero, ScatterRadius);
                 var finalPos = spawnPos + offset;
-                var spawned = SpawnEntity.Now(drop.Blueprint, finalPos);
+                // Defer spawn to next tick to spread registration cost and avoid spikes during mass drops
+                SpawnEntity.NextTick(drop.Blueprint, finalPos);
                 
                 if (i == 0) // Log once per drop type
                 {

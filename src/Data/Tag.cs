@@ -11,6 +11,9 @@ public readonly struct Tag : IEquatable<Tag>
         _id = id;
     }
 
+    // Exposed for high-perf lookups inside the assembly; keeps struct a thin id wrapper.
+    internal int Id => _id;
+
     public static Tag From(string name)
     {
         return new Tag(TagRegistry.GetOrCreateId(name));

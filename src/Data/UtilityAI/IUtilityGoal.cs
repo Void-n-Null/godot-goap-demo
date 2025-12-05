@@ -1,6 +1,6 @@
 using Game.Data;
 using Game.Data.GOAP;
-
+using System.Collections.Generic;
 namespace Game.Data.UtilityAI;
 
 /// <summary>
@@ -55,4 +55,21 @@ public interface IUtilityGoalTagInterest
     /// Returns true if the given tag should trigger a re-evaluation for this goal.
     /// </summary>
     bool IsTargetTagRelevant(Tag tag);
+}
+
+/// <summary>
+/// Optional contract for goals that want to receive spawn/despawn events for specific tags.
+/// </summary>
+public interface IUtilityGoalWorldEventInterest
+{
+    /// <summary>
+    /// Tags whose spawns should be observed for this goal.
+    /// </summary>
+    IEnumerable<Tag> SpawnEventTags { get; }
+
+    /// <summary>
+    /// Tags whose despawns should be observed for this goal.
+    /// Can be empty if despawns are not relevant.
+    /// </summary>
+    IEnumerable<Tag> DespawnEventTags { get; }
 }

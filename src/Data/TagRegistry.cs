@@ -8,7 +8,8 @@ internal static class TagRegistry
 {
     private static readonly object Sync = new();
     private static readonly Dictionary<string, int> NameToId = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly List<string> IdToName = new() { string.Empty }; // index 0 unused
+    // Lock-free reads via Volatile.Read on the array reference; index 0 unused.
+    private static string[] IdToName = { string.Empty };
     private static int _nextId = 0; // will increment to 1 on first tag
 
     public static int GetOrCreateId(string name)
@@ -26,7 +27,8 @@ internal static class TagRegistry
             var id = Interlocked.Increment(ref _nextId);
             NameToId[name] = id;
             EnsureCapacity(id);
-            if (id == IdToName.Count) IdToName.Add(name); else IdToName[id] = name;
+            // We are under lock; safe to write the published array.
+            IdToName[id] = name;
             return id;
         }
     }
@@ -47,18 +49,26 @@ internal static class TagRegistry
 
     public static string GetName(int id)
     {
-        lock (Sync)
-        {
-            return (id > 0 && id < IdToName.Count) ? IdToName[id] : string.Empty;
-        }
+        var snapshot = Volatile.Read(ref IdToName);
+        return (id > 0 && id < snapshot.Length) ? snapshot[id] : string.Empty;
     }
 
     private static void EnsureCapacity(int id)
     {
-        while (IdToName.Count <= id)
+        if (id < IdToName.Length)
+            return;
+
+        // Double the array size until it fits; performed under lock.
+        var newLength = IdToName.Length;
+        while (newLength <= id)
         {
-            IdToName.Add(string.Empty);
+            newLength *= 2;
         }
+
+        var expanded = new string[newLength];
+        Array.Copy(IdToName, expanded, IdToName.Length);
+        // Publish the new array for lock-free readers.
+        IdToName = expanded;
     }
 }
 

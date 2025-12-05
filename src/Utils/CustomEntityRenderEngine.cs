@@ -11,6 +11,8 @@ namespace Game.Utils;
 public partial class EntityRenderEngine : Node2D
 {
 	[Export] public bool UseShaderOverlay = true;
+	[Export] public bool EnableSpatialCulling = false;
+	[Export] public float CullingPadding = 256f;
 	private readonly Dictionary<Texture2D, Vector2> _textureSizeCache = new();
 	private readonly LinkedList<Texture2D> _textureCacheLRU = new();
 	private const int MAX_TEXTURE_CACHE_SIZE = 1000; // Limit cache size to prevent memory leaks
@@ -69,6 +71,9 @@ public partial class EntityRenderEngine : Node2D
 	private readonly Dictionary<SpriteKey, Item> _lookup = new();
 	private ulong _nextId = 1;
 	private bool _orderDirty = true;
+	private bool _redrawRequested = false;
+	private Vector2 _lastCameraPos = Vector2.Inf;
+	private Vector2 _lastCameraZoom = Vector2.Inf;
 	private readonly List<DebugArrow> _debugArrows = new();
 	private readonly List<DebugLine> _debugLines = new();
 	private readonly List<DebugCircle> _debugCircles = new();
@@ -138,14 +143,40 @@ public partial class EntityRenderEngine : Node2D
 
 	public override void _Process(double delta)
 	{
-		if (AlwaysRedraw)
+		if (EnableSpatialCulling)
+		{
+			var cam = GetViewport()?.GetCamera2D();
+			if (cam != null)
+			{
+				var pos = cam.GlobalPosition;
+				var zoom = cam.Zoom;
+				if (!_lastCameraPos.IsEqualApprox(pos) || !_lastCameraZoom.IsEqualApprox(zoom))
+				{
+					_lastCameraPos = pos;
+					_lastCameraZoom = zoom;
+					_redrawRequested = true;
+				}
+			}
+		}
+
+		// Collapse all per-item redraw requests into a single call per frame.
+		bool needsRedraw = AlwaysRedraw || _redrawRequested;
+		if (needsRedraw)
+		{
 			QueueRedraw();
+			_redrawRequested = false;
+		}
+	}
+
+	private void RequestRedraw()
+	{
+		_redrawRequested = true;
 	}
 
 	public void QueueDebugArrow(Vector2 from, Vector2 to, Color color, float thickness = 2f)
 	{
 		_debugArrows.Add(new DebugArrow { From = from, To = to, Color = color, Thickness = thickness });
-		QueueRedraw();
+		RequestRedraw();
 	}
 
 	public void QueueDebugVector(Vector2 origin, Vector2 vector, Color color, float thickness = 2f)
@@ -156,7 +187,7 @@ public partial class EntityRenderEngine : Node2D
 	public void QueueDebugLine(Vector2 from, Vector2 to, Color color, float thickness = 2f)
 	{
 		_debugLines.Add(new DebugLine { From = from, To = to, Color = color, Thickness = thickness });
-		QueueRedraw();
+		RequestRedraw();
 	}
 
 	public void QueueDebugCircle(Vector2 center, float radius, Color color, float thickness = 2f, int segments = 24)
@@ -164,7 +195,7 @@ public partial class EntityRenderEngine : Node2D
 		if (segments < 4) segments = 4;
 		if (radius < 0f) radius = 0f;
 		_debugCircles.Add(new DebugCircle { Center = center, Radius = radius, Color = color, Thickness = thickness, Segments = segments });
-		QueueRedraw();
+		RequestRedraw();
 	}
 
 	public ulong AddSprite(Texture2D texture, Vector2 position, float rotation = 0f, Vector2? scale = null, Color? modulate = null, float zBias = 0f)
@@ -184,7 +215,7 @@ public partial class EntityRenderEngine : Node2D
 		_items.Add(item);
 		_lookup[new SpriteKey(id)] = item;
 		_orderDirty = true;
-		QueueRedraw();
+		RequestRedraw();
 		return id;
 	}
 
@@ -196,7 +227,7 @@ public partial class EntityRenderEngine : Node2D
 		item.Position = position;
 		item.Rotation = rotation;
 		item.Scale = scale;
-		QueueRedraw();
+		RequestRedraw();
 	}
 
 	public void UpdateSpriteTexture(ulong id, Texture2D texture)
@@ -204,14 +235,14 @@ public partial class EntityRenderEngine : Node2D
 		if (texture == null) return;
 		if (_lookup.TryGetValue(new SpriteKey(id), out var item))
 			item.Texture = texture;
-		QueueRedraw();
+		RequestRedraw();
 	}
 
 	public void UpdateSpriteModulate(ulong id, Color color)
 	{
 		if (_lookup.TryGetValue(new SpriteKey(id), out var item))
 			item.Modulate = color;
-		QueueRedraw();
+		RequestRedraw();
 	}
 
 	public void UpdateSpriteZBias(ulong id, float zBias)
@@ -222,7 +253,7 @@ public partial class EntityRenderEngine : Node2D
 			{
 				item.ZBias = zBias;
 				_orderDirty = true;
-				QueueRedraw();
+				RequestRedraw();
 			}
 		}
 	}
@@ -240,7 +271,7 @@ public partial class EntityRenderEngine : Node2D
 			_items.RemoveAt(last);
 		}
 		_orderDirty = true;
-		QueueRedraw();
+		RequestRedraw();
 	}
 
 	public void UpdateSpriteOverlayGradient(ulong id, float intensity, Color topColor, Color bottomColor, Color? blendColor = null, Vector2? direction = null)
@@ -253,7 +284,7 @@ public partial class EntityRenderEngine : Node2D
 			item.OverlayBlend = blendColor.Value;
 		if (direction.HasValue && direction.Value != Vector2.Zero)
 			item.OverlayDirection = direction.Value.Normalized();
-		QueueRedraw();
+		RequestRedraw();
 	}
 
 	public void ClearSpriteOverlay(ulong id)
@@ -264,11 +295,30 @@ public partial class EntityRenderEngine : Node2D
 		item.OverlayBottom = Colors.Transparent;
 		item.OverlayBlend = Colors.White;
 		item.OverlayDirection = Vector2.Up;
-		QueueRedraw();
+		RequestRedraw();
 	}
 
 	public override void _Draw()
 	{
+		Rect2? visibleRect = null;
+		if (EnableSpatialCulling)
+		{
+			var cam = GetViewport()?.GetCamera2D();
+			if (cam != null)
+			{
+				var viewportRect = GetViewportRect();
+				// Visible size in world units accounts for zoom (zoom > 1 means fewer world units)
+				var zoom = cam.Zoom;
+				var size = new Vector2(
+					zoom.X != 0 ? viewportRect.Size.X / zoom.X : viewportRect.Size.X,
+					zoom.Y != 0 ? viewportRect.Size.Y / zoom.Y : viewportRect.Size.Y);
+				var half = size * 0.5f;
+				var paddedSize = size + new Vector2(CullingPadding * 2f, CullingPadding * 2f);
+				var topLeft = cam.GlobalPosition - half - new Vector2(CullingPadding, CullingPadding);
+				visibleRect = new Rect2(topLeft, paddedSize);
+			}
+		}
+
 		if (_orderDirty)
 		{
 			_items.Sort((a, b) =>
@@ -284,6 +334,7 @@ public partial class EntityRenderEngine : Node2D
 		{
 			var it = _items[i];
 			if (it.Texture == null) continue;
+			if (visibleRect.HasValue && !visibleRect.Value.HasPoint(it.Position)) continue;
 
 			DrawSetTransform(it.Position, it.Rotation, it.Scale);
 			if (!_textureSizeCache.TryGetValue(it.Texture, out var size))
@@ -348,6 +399,12 @@ public partial class EntityRenderEngine : Node2D
 
 		// Reset transform so debug overlays draw in world space
 		DrawSetTransform(Vector2.Zero, 0f, Vector2.One);
+
+		if (visibleRect.HasValue && EnableSpatialCulling)
+		{
+			// Visualize the culling AABB to sanity-check coverage
+			DrawRect(visibleRect.Value, new Color(0f, 1f, 1f, 0.35f), false, 2f);
+		}
 
 		// Draw debug primitives last so they appear over sprites
 		if (UseShaderOverlay && _spriteMaterial != null)

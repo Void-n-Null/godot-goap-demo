@@ -25,6 +25,8 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	public int MaxEntitiesPerFrame { get; set; } = 1000; // Max entities to update per frame
 	[Export]
 	public int MaxFramesPerTick { get; set; } = 10; // Max frames to spread a tick across
+	[Export]
+	public bool BroadcastDespawnEvents { get; set; } = true;
 	/// <summary>
 	/// Maximum entities to prevent memory issues.
 	/// </summary>
@@ -62,7 +64,8 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 	public IReadOnlyList<IUpdatableEntity> AllEntities => _registry.Entities;
 	public IReadOnlyList<IUpdatableEntity> GetEntities() => _registry.Entities;
 	public bool RegisterEntity(IUpdatableEntity entity) => _registry.Register(entity);
-	public bool UnregisterEntity(IUpdatableEntity entity) => _registry.Unregister(entity);
+	public bool UnregisterEntity(IUpdatableEntity entity, bool broadcastWorldEvent = true)
+		=> _registry.Unregister(entity, broadcastWorldEvent && BroadcastDespawnEvents);
 
 	public override void _Ready()
 	{
@@ -88,11 +91,13 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		// Ensure a CustomEntityRenderEngine exists for immediate-mode rendering
 		if (EntityRendererFinder.Renderer == null)
 		{
-			var ysorted = new EntityRenderEngine();
+			var renderingEngine = new EntityRenderEngine();
+			renderingEngine.EnableSpatialCulling = true;
+			renderingEngine.CullingPadding = 256f;
 			if (ViewRoot is Node2D vr2b)
-				vr2b.AddChild(ysorted);
+				vr2b.AddChild(renderingEngine);
 			else
-				AddChild(ysorted);
+				AddChild(renderingEngine);
 		}
 	}
 

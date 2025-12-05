@@ -167,7 +167,7 @@ public class EntityRegistry
 	/// <summary>
 	/// Unregister an entity from the registry
 	/// </summary>
-	public bool Unregister(IUpdatableEntity entity)
+	public bool Unregister(IUpdatableEntity entity, bool broadcastWorldEvent = false)
 	{
 		if (entity == null)
 			return false;
@@ -192,7 +192,10 @@ public class EntityRegistry
 			UnhookActiveTracking(e);
 			_activeTracker.Remove(e);
 			
-			WorldEventBus.Instance.PublishEntityDespawned(e);
+			if (broadcastWorldEvent)
+			{
+				WorldEventBus.Instance.PublishEntityDespawned(e);
+			}
 			
 			EntityUnregistered?.Invoke(e);
 		}

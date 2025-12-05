@@ -29,6 +29,7 @@ public sealed class Plan
 	public State CurrentState => _currentState;
 	public bool IsComplete { get; private set; }
 	public bool Succeeded { get; private set; }
+	public int CurrentStepIndex => _currentStepIndex;
 	
 	/// <summary>
 	/// Gets the current result status of the plan

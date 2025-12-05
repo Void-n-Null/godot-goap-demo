@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using Game.Data.Components;
 using Game.Universe;
 using Godot;
@@ -62,31 +61,54 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
         float searchRadius = _finderConfig.SearchRadius;
         const int MAX_ATTEMPTS = 3;
         var random = new System.Random();
+        var agentPos = agent.Transform.Position;
 
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++)
         {
-            var candidates = ServiceLocator.EntityManager
-                .QueryByComponent<TransformComponent2D>(agent.Transform.Position, searchRadius)
-                .Where(_finderConfig.Filter);
+            Entity best = null;
+            float bestScore = float.MaxValue;
 
-            // Apply reservation filters
-            if (_finderConfig.RequireUnreserved)
+            foreach (var candidate in ServiceLocator.EntityManager
+                         .QueryByComponent<TransformComponent2D>(agentPos, searchRadius))
             {
-                candidates = candidates.Where(e => ResourceReservationManager.Instance.IsAvailableFor(e, agent));
-            }
-            else if (_finderConfig.RequireReservation)
-            {
-                candidates = candidates.Where(e => ResourceReservationManager.Instance.IsReservedBy(e, agent));
+                if (_finderConfig.Filter != null)
+                {
+                    bool passes;
+                    try
+                    {
+                        passes = _finderConfig.Filter(candidate);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+                    if (!passes) continue;
+                }
+
+                if (_finderConfig.RequireUnreserved)
+                {
+                    if (!ResourceReservationManager.Instance.IsAvailableFor(candidate, agent))
+                        continue;
+                }
+                else if (_finderConfig.RequireReservation)
+                {
+                    if (!ResourceReservationManager.Instance.IsReservedBy(candidate, agent))
+                        continue;
+                }
+
+                // Random jitter reduces contention for identical nearest targets
+                float distance = agentPos.DistanceTo(candidate.Transform.Position);
+                float score = distance + (float)random.NextDouble() * 50f;
+
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    best = candidate;
+                }
             }
 
-            // Get nearest with small random offset to reduce contention
-            // (prevents all agents from targeting the exact same tree/resource)
-            var nearest = candidates
-                .OrderBy(e => agent.Transform.Position.DistanceTo(e.Transform.Position) + (float)random.NextDouble() * 50f)
-                .FirstOrDefault();
-
-            if (nearest != null)
-                return nearest;
+            if (best != null)
+                return best;
 
             // Expand search radius for next attempt
             searchRadius *= 2f;

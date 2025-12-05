@@ -217,15 +217,8 @@ public partial class NPCInspectorBrainTab : VBoxContainer
 
         if (hasExecutor && executor != null)
         {
-            var execType = typeof(AIGoalExecutor);
-            currentPlan = execType.GetField("_currentPlan", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(executor) as Data.GOAP.Plan;
-        }
-
-        if (currentPlan != null)
-        {
-            var planType = typeof(Data.GOAP.Plan);
-            var idxObj = planType.GetField("_currentStepIndex", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(currentPlan);
-            if (idxObj is int idx) currentStepIndex = idx;
+            currentPlan = executor.ActivePlan;
+            currentStepIndex = executor.ActivePlanStepIndex;
         }
 
         // --- Update Active Goal Card ---

@@ -329,9 +329,9 @@ public static class AdvancedGoalPlanner
         var implicitGoals = DeriveImplicitRequirements(initialState, goalState, steps);
         
         // Debug: Log goal state and available steps (using GD.Print to bypass LM toggle)
-        GD.Print($"[Planner] Goal: {string.Join(", ", goalState.FactsById.Select(f => $"{FactRegistry.GetName(f.Key)}={f.Value}"))}");
-        GD.Print($"[Planner] Available steps ({steps.Count}): {string.Join(", ", steps.Select(s => s.Name))}");
-        GD.Print($"[Planner] Initial state: {initialState}");
+        LM.Debug($"[Planner] Goal: {string.Join(", ", goalState.FactsById.Select(f => $"{FactRegistry.GetName(f.Key)}={f.Value}"))}");
+        LM.Debug($"[Planner] Available steps ({steps.Count}): {string.Join(", ", steps.Select(s => s.Name))}");
+        LM.Debug($"[Planner] Initial state: {initialState}");
 
         //Now then... Let's begin our A* Forward planning!
         var openSet = new PriorityQueue<(State state, PathNode path, double gCost, float fScore), float>();
