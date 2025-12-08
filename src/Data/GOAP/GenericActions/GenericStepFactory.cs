@@ -172,21 +172,27 @@ public class GenericStepFactory : IStepFactory
         pre.Set(FactKeys.WorldHas(tag), true);
         pre.Set(FactKeys.NearTarget(tag), true);
 
+        // Pre-compute keys and IDs outside lambdas to avoid string allocation per call
+        var agentCountKey = FactKeys.AgentCount(tag);
+        var agentCountId = FactRegistry.GetId(agentCountKey);
+        var worldCountKey = FactKeys.WorldCount(tag);
+        var worldCountId = FactRegistry.GetId(worldCountKey);
+
         var effects = new List<(string, object)>
         {
-            (FactKeys.AgentCount(tag), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.AgentCount(tag), out var invObj))
+            (agentCountKey, (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(agentCountId, out var invObj))
                     return invObj.IntValue + 1;
                 return 1;
             })),
             (FactKeys.AgentHas(tag), (FactValue)true),
-            (FactKeys.WorldCount(tag), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(tag), out var worldObj))
+            (worldCountKey, (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(worldCountId, out var worldObj))
                     return Math.Max(0, worldObj.IntValue - 1);
                 return 0;
             })),
             (FactKeys.WorldHas(tag), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(tag), out var worldObj))
+                if (ctx.TryGet(worldCountId, out var worldObj))
                     return worldObj.IntValue - 1 > 0;
                 return false;
             }))
@@ -221,25 +227,32 @@ public class GenericStepFactory : IStepFactory
         pre.Set(FactKeys.NearTarget(harvest.SourceTag), true);
         pre.Set(FactKeys.WorldHas(harvest.SourceTag), true);
 
+        // Pre-compute keys and IDs outside lambdas to avoid string allocation per call
+        var producedCountKey = FactKeys.WorldCount(harvest.ProducedTag);
+        var producedCountId = FactRegistry.GetId(producedCountKey);
+        var sourceCountKey = FactKeys.WorldCount(harvest.SourceTag);
+        var sourceCountId = FactRegistry.GetId(sourceCountKey);
+        var producedCount = harvest.ProducedCount; // Capture value
+
         var effects = new List<(string, object)>
         {
             (FactKeys.TargetChopped(harvest.SourceTag), (FactValue)true),
             (FactKeys.WorldHas(harvest.ProducedTag), (FactValue)true),
 
-            (FactKeys.WorldCount(harvest.ProducedTag), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(harvest.ProducedTag), out var wObj))
-                    return wObj.IntValue + harvest.ProducedCount;
-                return harvest.ProducedCount;
+            (producedCountKey, (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(producedCountId, out var wObj))
+                    return wObj.IntValue + producedCount;
+                return producedCount;
             })),
 
-            (FactKeys.WorldCount(harvest.SourceTag), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(harvest.SourceTag), out var tObj))
+            (sourceCountKey, (Func<State, FactValue>)(ctx => {
+                if (ctx.TryGet(sourceCountId, out var tObj))
                     return Math.Max(0, tObj.IntValue - 1);
                 return 0;
             })),
 
             (FactKeys.WorldHas(harvest.SourceTag), (Func<State, FactValue>)(ctx => {
-                if (ctx.TryGet(FactKeys.WorldCount(harvest.SourceTag), out var tObj))
+                if (ctx.TryGet(sourceCountId, out var tObj))
                     return tObj.IntValue - 1 > 0;
                 return false;
             })),
@@ -292,7 +305,10 @@ public class GenericStepFactory : IStepFactory
             CostFactory = _ => cooking.DepositCost
         });
 
-        // 2. Retrieve step
+        // 2. Retrieve step - pre-compute keys/IDs outside lambda
+        var outputCountKey = FactKeys.AgentCount(cooking.OutputTag);
+        var outputCountId = FactRegistry.GetId(outputCountKey);
+        
         var retrievePre = State.Empty();
         retrievePre.Set(FactKeys.NearTarget(cooking.StationTag), true);
         retrievePre.Set(FactKeys.CampfireCooking(cooking.InputTag), true);
@@ -301,8 +317,8 @@ public class GenericStepFactory : IStepFactory
         {
              (FactKeys.CampfireCooking(cooking.InputTag), (FactValue)false),
              (FactKeys.AgentHas(cooking.OutputTag), (FactValue)true),
-             (FactKeys.AgentCount(cooking.OutputTag), (Func<State, FactValue>)(ctx => {
-                 if (ctx.TryGet(FactKeys.AgentCount(cooking.OutputTag), out var c))
+             (outputCountKey, (Func<State, FactValue>)(ctx => {
+                 if (ctx.TryGet(outputCountId, out var c))
                      return c.IntValue + 1;
                  return 1;
              }))
@@ -323,12 +339,16 @@ public class GenericStepFactory : IStepFactory
         pre.Set(FactKeys.AgentHas(consumable.ItemTag), true);
         pre.Set(consumable.SatisfiesFact, !consumable.SatisfiesValue); // e.g., "IsHungry" = true (means we ARE hungry)
 
+        // Pre-compute keys and IDs outside lambda
+        var agentCountKey = FactKeys.AgentCount(consumable.ItemTag);
+        var agentCountId = FactRegistry.GetId(agentCountKey);
+
         var effects = new List<(string, object)>
         {
             (consumable.SatisfiesFact, (FactValue)consumable.SatisfiesValue),
             (FactKeys.AgentHas(consumable.ItemTag), (FactValue)false),
-            (FactKeys.AgentCount(consumable.ItemTag), (Func<State, FactValue>)(ctx => {
-                 if (ctx.TryGet(FactKeys.AgentCount(consumable.ItemTag), out var c))
+            (agentCountKey, (Func<State, FactValue>)(ctx => {
+                 if (ctx.TryGet(agentCountId, out var c))
                      return Math.Max(0, c.IntValue - 1);
                  return 0;
             }))
@@ -354,13 +374,17 @@ public class GenericStepFactory : IStepFactory
                 pre.Set(FactKeys.AgentCount(kvp.Key), kvp.Value);
             }
 
+            // Pre-compute keys and IDs outside lambdas
+            var worldCountKey = FactKeys.WorldCount(recipe.OutputTag);
+            var worldCountId = FactRegistry.GetId(worldCountKey);
+
             var effects = new List<(string, object)>
             {
                 (FactKeys.WorldHas(recipe.OutputTag), (FactValue)true),
                 (FactKeys.NearTarget(recipe.OutputTag), (FactValue)true),
-                (FactKeys.WorldCount(recipe.OutputTag), (Func<State, FactValue>)(ctx =>
+                (worldCountKey, (Func<State, FactValue>)(ctx =>
                 {
-                    if (ctx.TryGet(FactKeys.WorldCount(recipe.OutputTag), out var existing))
+                    if (ctx.TryGet(worldCountId, out var existing))
                         return existing.IntValue + 1;
                     return 1;
                 }))
@@ -368,9 +392,14 @@ public class GenericStepFactory : IStepFactory
 
             foreach (var kvp in recipe.Ingredients)
             {
-                effects.Add((FactKeys.AgentCount(kvp.Key), (Func<State, FactValue>)(ctx => {
-                    if (ctx.TryGet(FactKeys.AgentCount(kvp.Key), out var c))
-                        return Math.Max(0, c.IntValue - kvp.Value);
+                // Pre-compute for each ingredient
+                var ingredientCountKey = FactKeys.AgentCount(kvp.Key);
+                var ingredientCountId = FactRegistry.GetId(ingredientCountKey);
+                var consumeAmount = kvp.Value; // Capture value to avoid closure over kvp
+                
+                effects.Add((ingredientCountKey, (Func<State, FactValue>)(ctx => {
+                    if (ctx.TryGet(ingredientCountId, out var c))
+                        return Math.Max(0, c.IntValue - consumeAmount);
                     return 0;
                 })));
             }

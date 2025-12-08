@@ -209,6 +209,18 @@ public class State : IEnumerable<KeyValuePair<string, FactValue>>
     public FactIdEnumerable FactsById =>
         new FactIdEnumerable(_buffer.Facts, _buffer.ActiveIds);
 
+    /// <summary>
+    /// Direct access to internal data for high-performance iteration.
+    /// Avoids enumerator overhead. Caller must not modify the returned data.
+    /// </summary>
+    public (FactValue[] Facts, List<int> ActiveIds) GetDirectAccess() =>
+        (_buffer.Facts, _buffer.ActiveIds);
+    
+    /// <summary>
+    /// Fast direct lookup bypassing HasFact check. Use only when you know the fact exists.
+    /// </summary>
+    public FactValue GetDirect(int id) => _buffer.Facts[id];
+
     public IEnumerator<KeyValuePair<string, FactValue>> GetEnumerator()
     {
         foreach (var fact in EnumerateFacts())

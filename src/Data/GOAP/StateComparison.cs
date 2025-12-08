@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Game.Data.Components;
 
 namespace Game.Data.GOAP;
@@ -11,28 +12,38 @@ public static class StateComparison
     {
         float h = 0f;
 
+        // Get direct access to avoid enumerator overhead (was 45% of this method's time)
+        var (goalFacts, goalActiveIds) = goalState.GetDirectAccess();
+        var (currentFacts, currentActiveIds) = currentState.GetDirectAccess();
+
         // 1. Process explicit goals, merging any overlapping implicit requirements
-        foreach (var goalFact in goalState.FactsById)
+        for (int i = 0; i < goalActiveIds.Count; i++)
         {
-            FactValue effectiveTarget = goalFact.Value;
-            if (implicitGoals != null && implicitGoals.TryGet(goalFact.Key, out var implicitVal))
+            int key = goalActiveIds[i];
+            FactValue effectiveTarget = goalFacts[key];
+            
+            if (implicitGoals != null && implicitGoals.TryGet(key, out var implicitVal))
             {
-                effectiveTarget = ResolveStricterRequirement(goalFact.Value, implicitVal);
+                effectiveTarget = ResolveStricterRequirement(goalFacts[key], implicitVal);
             }
 
-            h += CalculateCost(currentState, goalFact.Key, effectiveTarget);
+            h += CalculateCostDirect(currentFacts, currentActiveIds, key, effectiveTarget);
         }
 
         // 2. Process remaining implicit goals (weighted) - skip if already in explicit goals
         if (implicitGoals != null)
         {
-            foreach (var implicitFact in implicitGoals.FactsById)
+            var (implicitFacts, implicitActiveIds) = implicitGoals.GetDirectAccess();
+            
+            for (int i = 0; i < implicitActiveIds.Count; i++)
             {
-                // Skip if already processed as explicit goal (no BitArray allocation needed)
-                if (goalState.TryGet(implicitFact.Key, out _))
+                int key = implicitActiveIds[i];
+                
+                // Skip if already processed as explicit goal (binary search on sorted list)
+                if (goalActiveIds.BinarySearch(key) >= 0)
                     continue;
 
-                float cost = CalculateCost(currentState, implicitFact.Key, implicitFact.Value);
+                float cost = CalculateCostDirect(currentFacts, currentActiveIds, key, implicitFacts[key]);
                 h += cost * IMPLICIT_GOAL_WEIGHT;
             }
         }
@@ -58,6 +69,33 @@ public static class StateComparison
 
         // Booleans/enums: prefer the explicit goal (end state)
         return goalVal;
+    }
+
+    /// <summary>
+    /// Direct cost calculation bypassing TryGet/HasFact overhead.
+    /// Uses binary search on sorted ActiveIds for existence check.
+    /// </summary>
+    private static float CalculateCostDirect(FactValue[] currentFacts, List<int> currentActiveIds, int key, FactValue targetVal)
+    {
+        // Binary search on sorted list - O(log n) for ~10-15 facts = 3-4 comparisons
+        int idx = currentActiveIds.BinarySearch(key);
+        if (idx >= 0)
+        {
+            var currentVal = currentFacts[key];
+            
+            if (targetVal.Type == FactType.Int && currentVal.Type == FactType.Int)
+                return Math.Max(0, targetVal.IntValue - currentVal.IntValue);
+
+            if (targetVal.Type == FactType.Float && currentVal.Type == FactType.Float)
+                return Math.Max(0f, targetVal.FloatValue - currentVal.FloatValue);
+
+            // Boolean/enum mismatch counts as 1
+            return currentVal.IntValue != targetVal.IntValue || currentVal.Type != targetVal.Type ? 1f : 0f;
+        }
+
+        // Missing facts: assume zero for numerics, flat cost for others
+        return targetVal.Type == FactType.Int ? targetVal.IntValue :
+               targetVal.Type == FactType.Float ? targetVal.FloatValue : 1f;
     }
 
     private static float CalculateCost(State current, int key, FactValue targetVal)
