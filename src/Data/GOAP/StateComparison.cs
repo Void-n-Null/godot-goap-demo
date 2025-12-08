@@ -1,6 +1,4 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
 using Game.Data.Components;
 
 namespace Game.Data.GOAP;
@@ -12,14 +10,10 @@ public static class StateComparison
     public static float CalculateStateComparisonHeuristic(State currentState, State goalState, State implicitGoals = null)
     {
         float h = 0f;
-        int factCount = FactRegistry.Count;
-        var processedKeys = new BitArray(factCount);
 
         // 1. Process explicit goals, merging any overlapping implicit requirements
         foreach (var goalFact in goalState.FactsById)
         {
-            processedKeys.Set(goalFact.Key, true);
-
             FactValue effectiveTarget = goalFact.Value;
             if (implicitGoals != null && implicitGoals.TryGet(goalFact.Key, out var implicitVal))
             {
@@ -29,12 +23,13 @@ public static class StateComparison
             h += CalculateCost(currentState, goalFact.Key, effectiveTarget);
         }
 
-        // 2. Process remaining implicit goals (weighted)
+        // 2. Process remaining implicit goals (weighted) - skip if already in explicit goals
         if (implicitGoals != null)
         {
             foreach (var implicitFact in implicitGoals.FactsById)
             {
-                if (processedKeys.Get(implicitFact.Key))
+                // Skip if already processed as explicit goal (no BitArray allocation needed)
+                if (goalState.TryGet(implicitFact.Key, out _))
                     continue;
 
                 float cost = CalculateCost(currentState, implicitFact.Key, implicitFact.Value);

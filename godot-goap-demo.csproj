@@ -4,5 +4,9 @@
     <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <RootNamespace>godotgoapdemo</RootNamespace>
+    
+    <!-- Uncomment to enable GOAP logging (adds overhead - disable for perf testing) -->
+    <!-- <DefineConstants>$(DefineConstants);GOAP_LOGGING</DefineConstants> -->
+    <!-- <DefineConstants>$(DefineConstants);GOAP_DEBUG</DefineConstants> -->
   </PropertyGroup>
 </Project>
