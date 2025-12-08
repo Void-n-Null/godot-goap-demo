@@ -272,6 +272,34 @@ public partial class PerformanceBenchmark : Node
 		
 		BenchmarkSleepScenarios(sleepGoal);
 		BenchmarkParallelGoals(sleepGoal, warmGoal, eatGoal);
+
+		// Additional deep-dive benchmark: large batch planning to surface small per-plan changes.
+		await BenchmarkPlanDeep(initialState, goalState);
+	}
+
+	/// <summary>
+	/// Stress tests GOAP planning in a single tight loop to amplify per-plan costs.
+	/// - Runs a large number of plans back-to-back without yielding.
+	/// - Uses fixed initial/goal states to keep variance low.
+	/// - Reports total time and ms/plan so small regressions are visible.
+	/// </summary>
+	private async Task BenchmarkPlanDeep(State initialState, State goalState)
+	{
+		const int deepPlanCount = 10_000;
+
+		ulong startUsec = Time.GetTicksUsec();
+		for (int i = 0; i < deepPlanCount; i++)
+		{
+			AdvancedGoalPlanner.ForwardPlan(initialState, goalState);
+		}
+		double totalMs = (Time.GetTicksUsec() - startUsec) / 1000.0;
+		double msPerPlan = totalMs / deepPlanCount;
+
+		GD.Print($"[PlanDeep] {deepPlanCount} plans -> {totalMs:F2} ms total ({msPerPlan:F4} ms/plan)");
+		_results.Add($"GOAP_PlanDeep,{deepPlanCount},{totalMs:F2},{msPerPlan:F4}");
+
+		// Yield once to keep the engine responsive after the long loop.
+		await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 	}
 
 	private void SpawnBenchmarkEntities(int count)
@@ -291,7 +319,10 @@ public partial class PerformanceBenchmark : Node
 	private void ExportResults()
 	{
 		string projectPath = ProjectSettings.GlobalizePath("res://");
-		string filePath = System.IO.Path.Combine(projectPath, $"performance_benchmark_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+		string timestampDir = DateTime.Now.ToString("MMMM-d-h-mmtt");
+		string dirPath = System.IO.Path.Combine(projectPath, "Benchmarks", timestampDir);
+		System.IO.Directory.CreateDirectory(dirPath);
+		string filePath = System.IO.Path.Combine(dirPath, $"performance_benchmark_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
 
 		try
 		{

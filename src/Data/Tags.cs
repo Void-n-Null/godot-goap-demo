@@ -1,7 +1,16 @@
+using System;
+
 namespace Game.Data;
 
 public static class Tags
 {
+    /// <summary>
+    /// Lookup table: TargetTagIndexById[tag.Id] = index in TargetTags, or -1 if not a target tag.
+    /// Enables O(1) target tag lookups instead of iterating.
+    /// </summary>
+    public static int[] TargetTagIndexById { get; private set; } = [];
+    
+    private static bool _initialized;
 
     public static readonly Tag Flammable = Tag.From("Flammable");
     public static readonly Tag AI = Tag.From("AI");
@@ -39,6 +48,41 @@ public static class Tags
     public static readonly Tag[] TargetTags = [
         Stick, Wood, Stone, RawBeef, Steak, Food, Tree, Bed, Campfire
     ];
+
+    /// <summary>
+    /// Initialize the target tag lookup table. Must be called once at startup.
+    /// </summary>
+    public static void InitializeTargetTagLookup()
+    {
+        if (_initialized) return;
+        _initialized = true;
+
+        // Find max tag ID
+        int maxId = 0;
+        foreach (var tag in TargetTags)
+        {
+            if (tag.Id > maxId) maxId = tag.Id;
+        }
+
+        // Build lookup: TargetTagIndexById[tag.Id] = index, or -1
+        TargetTagIndexById = new int[maxId + 1];
+        Array.Fill(TargetTagIndexById, -1);
+        
+        for (int i = 0; i < TargetTags.Length; i++)
+        {
+            TargetTagIndexById[TargetTags[i].Id] = i;
+        }
+    }
+
+    /// <summary>
+    /// Get the target tag index for a given tag ID. Returns -1 if not a target tag.
+    /// O(1) lookup after initialization.
+    /// </summary>
+    public static int GetTargetTagIndex(int tagId)
+    {
+        var lookup = TargetTagIndexById;
+        return (uint)tagId < (uint)lookup.Length ? lookup[tagId] : -1;
+    }
 }
 
 

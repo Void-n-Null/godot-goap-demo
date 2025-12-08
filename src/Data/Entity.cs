@@ -44,6 +44,13 @@ public class Entity : IUpdatableEntity
 	/// </summary>
 	public HashSet<Tag> Tags { get; } = [];
 
+	/// <summary>
+	/// Cached target tag index for O(1) proximity lookups.
+	/// -2 = not computed, -1 = no target tag, 0+ = index in Tags.TargetTags
+	/// </summary>
+	private sbyte _cachedTargetTagIndex = NotComputed;
+	private const sbyte NotComputed = -2;
+
 	private TransformComponent2D _transform;
 	private VisualComponent _visual;
 
@@ -70,24 +77,45 @@ public class Entity : IUpdatableEntity
 	/// <summary>
 	/// Adds a tag to this entity.
 	/// </summary>
-	public bool AddTag(Tag tag) => Tags.Add(tag);
+	public bool AddTag(Tag tag)
+	{
+		if (Tags.Add(tag))
+		{
+			_cachedTargetTagIndex = NotComputed; // Invalidate cache
+			return true;
+		}
+		return false;
+	}
 
 	/// <summary>
 	/// Adds a tag from its string name (bridged via registry).
 	/// </summary>
-	public bool AddTag(string tagName) => Tags.Add(Tag.From(tagName));
+	public bool AddTag(string tagName) => AddTag(Tag.From(tagName));
 
 	/// <summary>
 	/// Removes a tag from this entity.
 	/// </summary>
-	public bool RemoveTag(Tag tag) => Tags.Remove(tag);
+	public bool RemoveTag(Tag tag)
+	{
+		if (Tags.Remove(tag))
+		{
+			_cachedTargetTagIndex = NotComputed; // Invalidate cache
+			return true;
+		}
+		return false;
+	}
 
 	/// <summary>
 	/// Removes a tag by its string name.
 	/// </summary>
 	public bool RemoveTag(string tagName)
 	{
-		return Tag.TryFrom(tagName, out var tag) && Tags.Remove(tag);
+		if (Tag.TryFrom(tagName, out var tag) && Tags.Remove(tag))
+		{
+			_cachedTargetTagIndex = NotComputed; // Invalidate cache
+			return true;
+		}
+		return false;
 	}
 
 	/// <summary>
@@ -101,6 +129,34 @@ public class Entity : IUpdatableEntity
 	public bool HasTag(string tagName)
 	{
 		return Tag.TryFrom(tagName, out var tag) && Tags.Contains(tag);
+	}
+
+	/// <summary>
+	/// Gets the cached target tag index for O(1) proximity lookups.
+	/// Returns -1 if this entity has no target tags, otherwise returns the lowest index in Tags.TargetTags.
+	/// </summary>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public int GetCachedTargetTagIndex()
+	{
+		int cached = _cachedTargetTagIndex;
+		if (cached != NotComputed) return cached;
+		return ComputeAndCacheTargetTagIndex();
+	}
+
+	private int ComputeAndCacheTargetTagIndex()
+	{
+		int minIndex = int.MaxValue;
+		foreach (var tag in Tags)
+		{
+			int idx = Data.Tags.GetTargetTagIndex(tag.Id);
+			if (idx >= 0 && idx < minIndex)
+			{
+				minIndex = idx;
+			}
+		}
+		int result = minIndex == int.MaxValue ? -1 : minIndex;
+		_cachedTargetTagIndex = (sbyte)result;
+		return result;
 	}
 
 	/// <summary>

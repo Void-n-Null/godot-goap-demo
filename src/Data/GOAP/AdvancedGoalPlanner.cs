@@ -21,7 +21,7 @@ public static class AdvancedGoalPlanner
 {
     private static readonly PlanningConfig DefaultConfig = new() { MaxDepth = 50, MaxOpenSetSize = 1000 };
 
-    private static readonly Lazy<List<IStepFactory>> _cachedFactories = new Lazy<List<IStepFactory>>(
+    private static readonly Lazy<List<IStepFactory>> _cachedFactories = new(
         () => LocateStepFactoriesInternal(), 
         LazyThreadSafetyMode.ExecutionAndPublication);
     private static List<IStepFactory> CachedFactories => _cachedFactories.Value;
@@ -56,15 +56,6 @@ public static class AdvancedGoalPlanner
     }
 
     /// <summary>
-    /// Computes a deterministic int hash for a state to track visited states.
-    /// Now delegates to State.GetDeterministicHash() which caches the result.
-    /// </summary>
-    private static int ComputeStateHash(State state)
-    {
-        return state?.GetDeterministicHash() ?? 0;
-    }
-
-    /// <summary>
     /// Creates a successor state by applying a step to the current state.
     /// Uses layered state with parent pointer - only stores the delta to minimize allocations.
     /// </summary>
@@ -79,24 +70,23 @@ public static class AdvancedGoalPlanner
         var newState = currentState.Clone();
 
         var compiledEffects = step.CompiledEffects;
-        for (int i = 0; i < compiledEffects.Length; i++)
+        foreach (var kvp in compiledEffects)
         {
-            var kvp = compiledEffects[i];
             var resolvedValue = ResolveEffectValue(kvp.Value, currentState);
             newState.Set(kvp.Key, resolvedValue);
         }
 
         var newPath = new PathNode(step, currentPath); // O(1) instead of O(n)
 
-        double stepCost = step.GetCost(currentState);
-        double newGCost = currentGCost + stepCost;
-        float heuristic = StateComparison.CalculateStateComparisonHeuristic(newState, goalState, implicitGoals);
+        var stepCost = step.GetCost(currentState);
+        var newGCost = currentGCost + stepCost;
+        var heuristic = StateComparison.CalculateStateComparisonHeuristic(newState, goalState, implicitGoals);
         
         // Add significant depth penalty to strongly prefer shorter paths
         // Without this, A* explores deep cooking paths before finding the simpler direct path
         // Each step adds 0.5 to fScore, making 50-step paths significantly more expensive than 3-step paths
-        float depthPenalty = newPath.Depth * 1f;
-        float fScore = (float)newGCost + heuristic + depthPenalty;
+        var depthPenalty = newPath.Depth * 1f;
+        var fScore = (float)newGCost + heuristic + depthPenalty;
 
         return (newState, newPath, newGCost, fScore);
     }
@@ -352,7 +342,7 @@ public static class AdvancedGoalPlanner
 
 
             // Check if already visited
-            var stateHash = ComputeStateHash(currentState);
+            var stateHash = currentState?.GetDeterministicHash() ?? 0;
             if (!visited.Add(stateHash)) continue;
 
             // Check if goal reached
@@ -455,7 +445,7 @@ public static class AdvancedGoalPlanner
                     var (currentState, pathNode, gCost, _) = candidate;
 
                     // Check if already visited
-                    var stateHash = ComputeStateHash(currentState);
+                    var stateHash = currentState?.GetDeterministicHash() ?? 0;
                     if (!visited.TryAdd(stateHash, true))
                         return;
 

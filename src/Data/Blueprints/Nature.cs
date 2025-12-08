@@ -65,7 +65,8 @@ public static class Nature
         var transform = treeEntity?.Transform;
         if (transform == null) return;
 
-        SpawnEntity.Now(TreeStump, transform.Position);
+        // Defer stump spawn to next tick to avoid blocking during mass tree deaths
+        SpawnEntity.NextTick(TreeStump, transform.Position);
     }
 
     // Add more variants as needed, e.g., OakTree, PineTree with different visuals/health

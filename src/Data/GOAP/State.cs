@@ -9,22 +9,51 @@ namespace Game.Data.GOAP;
 
 public class State : IEnumerable<KeyValuePair<string, FactValue>>
 {
-    private FactValue[] _facts; 
-    private System.Collections.BitArray _mask; 
-    private int? _cachedHash;
+    /// <summary>
+    /// Backing storage with copy-on-write semantics to make Clone() cheap.
+    /// When a clone is created, the buffer is marked shared; any mutation first
+    /// copies the buffer so readers stay isolated.
+    /// </summary>
+    private sealed class Buffer
+    {
+        public FactValue[] Facts;
+        public System.Collections.BitArray Mask;
+        public int? CachedHash;
+        public bool IsShared;
+
+        public Buffer(int capacity)
+        {
+            Facts = new FactValue[capacity];
+            Mask = new System.Collections.BitArray(capacity);
+            CachedHash = null;
+            IsShared = false;
+        }
+
+        private Buffer(FactValue[] facts, System.Collections.BitArray mask)
+        {
+            Facts = facts;
+            Mask = mask;
+            CachedHash = null;
+            IsShared = false;
+        }
+
+        public Buffer CloneDeep()
+        {
+            var factsCopy = new FactValue[Facts.Length];
+            Array.Copy(Facts, factsCopy, Facts.Length);
+            return new Buffer(factsCopy, (System.Collections.BitArray)Mask.Clone());
+        }
+    }
+
+    private Buffer _buffer;
 
     public State()
     {
         int capacity = Math.Max(FactRegistry.Count + 10, 64); 
-        _facts = new FactValue[capacity];
-        _mask = new System.Collections.BitArray(capacity);
+        _buffer = new Buffer(capacity);
     }
     
-    private State(FactValue[] facts, System.Collections.BitArray mask)
-    {
-        _facts = facts;
-        _mask = mask;
-    }
+    private State(Buffer buffer) => _buffer = buffer;
 
     public static State Empty() => new State();
 
@@ -33,25 +62,28 @@ public class State : IEnumerable<KeyValuePair<string, FactValue>>
     /// </summary>
     public void Clear()
     {
-        _mask.SetAll(false);
-        _cachedHash = null;
+        EnsureUnique();
+        _buffer.Mask.SetAll(false);
+        _buffer.CachedHash = null;
     }
 
     public void Set(string name, FactValue value)
     {
         int id = FactRegistry.GetId(name);
+        EnsureUnique();
         EnsureCapacity(id);
-        _facts[id] = value;
-        _mask.Set(id, true);
-        _cachedHash = null;
+        _buffer.Facts[id] = value;
+        _buffer.Mask.Set(id, true);
+        _buffer.CachedHash = null;
     }
 
     public void Set(int id, FactValue value)
     {
+        EnsureUnique();
         EnsureCapacity(id);
-        _facts[id] = value;
-        _mask.Set(id, true);
-        _cachedHash = null;
+        _buffer.Facts[id] = value;
+        _buffer.Mask.Set(id, true);
+        _buffer.CachedHash = null;
     }
 
     public bool TryGet(string name, out FactValue value)
@@ -62,9 +94,9 @@ public class State : IEnumerable<KeyValuePair<string, FactValue>>
 
     public bool TryGet(int id, out FactValue value)
     {
-        if (id < _mask.Length && _mask.Get(id))
+        if (id < _buffer.Mask.Length && _buffer.Mask.Get(id))
         {
-            value = _facts[id];
+            value = _buffer.Facts[id];
             return true;
         }
         value = default;
@@ -73,17 +105,17 @@ public class State : IEnumerable<KeyValuePair<string, FactValue>>
 
     public bool Satisfies(State goal)
     {
-        for (int i = 0; i < goal._mask.Length; i++)
+        for (int i = 0; i < goal._buffer.Mask.Length; i++)
         {
-            if (goal._mask.Get(i))
+            if (goal._buffer.Mask.Get(i))
             {
-                 if (i >= _mask.Length || !_mask.Get(i))
+                 if (i >= _buffer.Mask.Length || !_buffer.Mask.Get(i))
                  {
                      return false;
                  }
                  
-                 var myVal = _facts[i];
-                 var goalVal = goal._facts[i];
+                 var myVal = _buffer.Facts[i];
+                 var goalVal = goal._buffer.Facts[i];
                  
                  if (myVal.Equals(goalVal)) continue;
 
@@ -102,40 +134,37 @@ public class State : IEnumerable<KeyValuePair<string, FactValue>>
     
     public State Clone()
     {
-        var newFacts = new FactValue[_facts.Length];
-        Array.Copy(_facts, newFacts, _facts.Length);
-        return new State(newFacts, (System.Collections.BitArray)_mask.Clone());
+        _buffer.IsShared = true;
+        return new State(_buffer);
     }
 
     public int GetDeterministicHash()
     {
-        if (_cachedHash.HasValue)
-            return _cachedHash.Value;
+        if (_buffer.CachedHash.HasValue)
+            return _buffer.CachedHash.Value;
 
-        var indices = new List<int>();
-        for (int i = 0; i < _mask.Length; i++)
+        // Deterministic: iterate ids in ascending order; no allocations.
+        int hash = 17;
+        for (int i = 0; i < _buffer.Mask.Length; i++)
         {
-            if (_mask.Get(i))
+            if (_buffer.Mask.Get(i))
             {
-                indices.Add(i);
+                var fact = _buffer.Facts[i];
+                hash = HashCode.Combine(hash, i, fact.IntValue, fact.Type);
             }
         }
-        indices.Sort();
 
-        int hash = 17;
-        foreach (var id in indices)
-        {
-            var fact = _facts[id];
-            hash = HashCode.Combine(hash, id, fact.IntValue, fact.Type);
-        }
-
-        _cachedHash = hash;
+        _buffer.CachedHash = hash;
         return hash;
     }
 
     public IEnumerable<KeyValuePair<string, FactValue>> Facts => EnumerateFacts();
     
-    public IEnumerable<KeyValuePair<int, FactValue>> FactsById => EnumerateFactsId();
+    public FactIdEnumerable FactsById =>
+        new FactIdEnumerable(
+            _buffer.Facts,
+            _buffer.Mask,
+            Math.Min(_buffer.Mask.Length, FactRegistry.Count));
 
     public IEnumerator<KeyValuePair<string, FactValue>> GetEnumerator()
     {
@@ -150,47 +179,105 @@ public class State : IEnumerable<KeyValuePair<string, FactValue>>
     private IEnumerable<KeyValuePair<string, FactValue>> EnumerateFacts()
     {
         int maxId = FactRegistry.Count;
-        for (int id = 0; id < _mask.Length && id < maxId; id++)
+        for (int id = 0; id < _buffer.Mask.Length && id < maxId; id++)
         {
-            if (_mask.Get(id))
+            if (_buffer.Mask.Get(id))
             {
-                yield return new KeyValuePair<string, FactValue>(FactRegistry.GetName(id), _facts[id]);
+                yield return new KeyValuePair<string, FactValue>(FactRegistry.GetName(id), _buffer.Facts[id]);
             }
         }
     }
 
-    private IEnumerable<KeyValuePair<int, FactValue>> EnumerateFactsId()
+    /// <summary>
+    /// Allocation-free enumerable over fact ids -> values to avoid iterator state machines.
+    /// </summary>
+    public readonly struct FactIdEnumerable : IEnumerable<KeyValuePair<int, FactValue>>
     {
-        int maxId = FactRegistry.Count;
-        for (int id = 0; id < _mask.Length && id < maxId; id++)
+        private readonly FactValue[] _facts;
+        private readonly System.Collections.BitArray _mask;
+        private readonly int _limit;
+
+        public FactIdEnumerable(FactValue[] facts, System.Collections.BitArray mask, int limit)
         {
-            if (_mask.Get(id))
-            {
-                yield return new KeyValuePair<int, FactValue>(id, _facts[id]);
-            }
+            _facts = facts;
+            _mask = mask;
+            _limit = limit;
         }
+
+        public FactIdEnumerator GetEnumerator() => new FactIdEnumerator(_facts, _mask, _limit);
+
+        IEnumerator<KeyValuePair<int, FactValue>> IEnumerable<KeyValuePair<int, FactValue>>.GetEnumerator() => GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    public struct FactIdEnumerator : IEnumerator<KeyValuePair<int, FactValue>>
+    {
+        private readonly FactValue[] _facts;
+        private readonly System.Collections.BitArray _mask;
+        private readonly int _limit;
+        private int _index;
+
+        public KeyValuePair<int, FactValue> Current { get; private set; }
+        object IEnumerator.Current => Current;
+
+        public FactIdEnumerator(FactValue[] facts, System.Collections.BitArray mask, int limit)
+        {
+            _facts = facts;
+            _mask = mask;
+            _limit = limit;
+            _index = -1;
+            Current = default;
+        }
+
+        public bool MoveNext()
+        {
+            while (++_index < _limit)
+            {
+                if (_mask.Get(_index))
+                {
+                    Current = new KeyValuePair<int, FactValue>(_index, _facts[_index]);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public void Reset() => _index = -1;
+        public void Dispose() { }
     }
 
     private void EnsureCapacity(int id)
     {
-        if (id >= _facts.Length)
+        if (id >= _buffer.Facts.Length)
         {
-            int newSize = Math.Max(id + 1, _facts.Length * 2);
-            Array.Resize(ref _facts, newSize);
+            int newSize = Math.Max(id + 1, _buffer.Facts.Length * 2);
+            Array.Resize(ref _buffer.Facts, newSize);
             var newMask = new System.Collections.BitArray(newSize);
-            for(int i=0; i<_mask.Length; i++) newMask[i] = _mask[i];
-            _mask = newMask;
+            for(int i=0; i<_buffer.Mask.Length; i++) newMask[i] = _buffer.Mask[i];
+            _buffer.Mask = newMask;
+        }
+    }
+
+    /// <summary>
+    /// Ensure this state has a unique buffer before mutation (copy-on-write).
+    /// </summary>
+    private void EnsureUnique()
+    {
+        if (_buffer.IsShared)
+        {
+            _buffer = _buffer.CloneDeep();
         }
     }
     
     public override string ToString()
     {
         var s = "State: ";
-        for(int i=0; i<_mask.Length; i++)
+        for(int i=0; i<_buffer.Mask.Length; i++)
         {
-            if(_mask.Get(i))
+            if(_buffer.Mask.Get(i))
             {
-                var val = _facts[i].Type == FactType.Int ? _facts[i].IntValue.ToString() : _facts[i].BoolValue.ToString();
+                var val = _buffer.Facts[i].Type == FactType.Int ? _buffer.Facts[i].IntValue.ToString() : _buffer.Facts[i].BoolValue.ToString();
                 s += $"{FactRegistry.GetName(i)}={val}|";
             }
         }

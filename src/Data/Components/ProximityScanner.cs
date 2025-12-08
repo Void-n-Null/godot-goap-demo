@@ -18,7 +18,6 @@ public sealed class ProximityScanner
 {
     private readonly GoalFactRegistry _facts;
     private readonly Tag[] _targetTags;
-    private readonly int[] _tagIndexById;
 
     private bool[] _proximityNear = [];
     private int[] _availabilityCounts = [];
@@ -39,7 +38,6 @@ public sealed class ProximityScanner
     {
         _facts = facts;
         _targetTags = facts.TargetTags;
-        _tagIndexById = BuildTagIdIndexLookup(_targetTags);
         EnsureBuffers();
     }
 
@@ -109,21 +107,28 @@ public sealed class ProximityScanner
             _nearestDistancesSq[i] = float.PositiveInfinity;
         }
 
+        // Query without predicate to avoid double tag iteration.
+        // GetTagIndex already returns -1 for non-target entities, so we filter inline.
         var nearbyEntities = Universe.EntityManager.Instance?.SpatialPartition?.QueryCircle(
             agentPos,
             searchRadius,
-            e => HasAnyTargetTag(e),
-            MAX_PROXIMITY_RESULTS);
+            predicate: null,
+            MAX_PROXIMITY_RESULTS * 4);  // Higher limit since we filter after
 
         if (nearbyEntities != null)
         {
             int tagCount = _facts.TargetTags.Length;
             const float nearDistSq = 64f * 64f;
+            int matchCount = 0;
 
             foreach (var entity in nearbyEntities)
             {
+                // GetTagIndex returns -1 for non-target entities (one tag iteration instead of two)
                 int tagIndex = GetTagIndex(entity);
-                if (tagIndex < 0 || tagIndex >= tagCount) continue;
+                if ((uint)tagIndex >= (uint)tagCount) continue;
+
+                // Early exit once we have enough matches
+                if (++matchCount > MAX_PROXIMITY_RESULTS) break;
 
                 float distSq = agentPos.DistanceSquaredTo(entity.Transform?.Position ?? agentPos);
 
@@ -160,35 +165,18 @@ public sealed class ProximityScanner
         }
     }
 
-    private bool HasAnyTargetTag(Entity e)
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static bool HasAnyTargetTag(Entity e)
     {
-        var lookup = _tagIndexById;
-        foreach (var tag in e.Tags)
-        {
-            int id = tag.Id;
-            if ((uint)id < (uint)lookup.Length && lookup[id] >= 0) return true;
-        }
-        return false;
+        // O(1) cached lookup - returns true if entity has any target tag
+        return e.GetCachedTargetTagIndex() >= 0;
     }
 
-    private int GetTagIndex(Entity e)
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static int GetTagIndex(Entity e)
     {
-        int minIndex = int.MaxValue;
-        var lookup = _tagIndexById;
-        foreach (var tag in e.Tags)
-        {
-            int id = tag.Id;
-            if ((uint)id < (uint)lookup.Length)
-            {
-                int idx = lookup[id];
-                if (idx >= 0 && idx < minIndex)
-                {
-                    minIndex = idx;
-                }
-            }
-        }
-
-        return minIndex == int.MaxValue ? -1 : minIndex;
+        // O(1) cached lookup - computed once per entity, cached until tags change
+        return e.GetCachedTargetTagIndex();
     }
 
     private Tag GetFirstTargetTag(Entity e)
@@ -214,31 +202,5 @@ public sealed class ProximityScanner
         }
     }
 
-    private static int[] BuildTagIdIndexLookup(Tag[] targetTags)
-    {
-        int maxId = 0;
-        for (int i = 0; i < targetTags.Length; i++)
-        {
-            if (targetTags[i].Id > maxId)
-            {
-                maxId = targetTags[i].Id;
-            }
-        }
-
-        var lookup = new int[maxId + 1];
-        Array.Fill(lookup, -1);
-
-        for (int i = 0; i < targetTags.Length; i++)
-        {
-            // Later lookups keep deterministic ordering by keeping the smallest index.
-            int id = targetTags[i].Id;
-            if (lookup[id] == -1 || i < lookup[id])
-            {
-                lookup[id] = i;
-            }
-        }
-
-        return lookup;
-    }
 }
 

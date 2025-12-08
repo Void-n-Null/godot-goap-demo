@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using Game.Data;
 using Godot;
 
@@ -16,16 +18,19 @@ public sealed class EntityQuadTree
     private struct NodeData
     {
         // Hot Data (Accessed in Query/IntersectsCircle)
-        // Reordered to fit in first 32-40 bytes for cache locality
-        public float CenterX;
-        public float CenterY;
-        public float LooseHalfSize;
-        public float LooseRadius;
+        // Pre-computed AABB bounds for zero-arithmetic intersection tests
+        public float LooseMinX;
+        public float LooseMinY;
+        public float LooseMaxX;
+        public float LooseMaxY;
         
         public int FirstChildIndex; // Index of first child (4 sequential nodes), or -1 if leaf
         public int FirstElementIndex; // Index of first element in linked list, or -1
 
-        public float HalfSize; // Used in Expand/Subdivide (less hot in queries)
+        // Used in Expand/Subdivide/GetQuadrant (less hot in queries)
+        public float CenterX;
+        public float CenterY;
+        public float HalfSize;
 
         // Metadata
         public int Count;
@@ -50,7 +55,6 @@ public sealed class EntityQuadTree
     private readonly int _maxItemsPerNode;
     private readonly float _looseFactor;
     private readonly int _maxDepth;
-    private const float SQRT2 = 1.41421356237f;
     
     // Storage
     private NodeData[] _nodes;
@@ -65,7 +69,8 @@ public sealed class EntityQuadTree
     
     // Reusable query buffers
     private readonly int[] _nodeStack; // Reusable stack for queries
-    private readonly List<Entity> _reusableResults = new(256);
+    private readonly List<Entity> _reusableResults = new(1024);
+    private const int MaxQueryResults = 1024;
     private readonly List<int> _rebuildHandles = new(256);
 
     public int TrackedEntityCount => _activeItemCount;
@@ -304,30 +309,42 @@ public sealed class EntityQuadTree
     /// </example>
     public List<Entity> QueryCircle(Vector2 center, float radius, Func<Entity, bool> predicate = null, int maxResults = int.MaxValue)
     {
-        _reusableResults.Clear();
-        if (_rootIndex == -1) return _reusableResults;
+        if (_rootIndex == -1)
+        {
+            _reusableResults.Clear();
+            return _reusableResults;
+        }
 
         float rSq = radius * radius;
         bool checkRadius = !float.IsPositiveInfinity(radius);
         
         // Root check: if root doesn't intersect, return empty
-        if (checkRadius && !IntersectsCircle(ref _nodes[_rootIndex], center, radius, rSq))
+        if (checkRadius && !IntersectsCircle(ref _nodes[_rootIndex], center, rSq))
         {
+            _reusableResults.Clear();
             return _reusableResults;
         }
+
+        // Clamp maxResults to buffer size and pre-allocate
+        int effectiveMax = Math.Min(maxResults, MaxQueryResults);
+        CollectionsMarshal.SetCount(_reusableResults, effectiveMax);
+        var resultsSpan = CollectionsMarshal.AsSpan(_reusableResults);
+        int resultCount = 0;
         
         int stackPtr = 0;
         _nodeStack[stackPtr++] = _rootIndex;
+        
+        // Cache center coordinates to avoid repeated struct field access
+        float cx = center.X;
+        float cy = center.Y;
+        bool hasPredicate = predicate != null;
 
-        while (stackPtr > 0 && _reusableResults.Count < maxResults)
+        while (stackPtr > 0 && resultCount < effectiveMax)
         {
             int nodeIdx = _nodeStack[--stackPtr];
             ref var node = ref _nodes[nodeIdx];
-
-            // Redundant check removed: we now check children before pushing them.
-            // Root was checked before loop.
             
-            // 2. Iterate Elements
+            // Iterate Elements
             int elIdx = node.FirstElementIndex;
             if (checkRadius)
             {
@@ -335,16 +352,16 @@ public sealed class EntityQuadTree
                 {
                     ref var el = ref _elements[elIdx];
                     
-                    // Check distance using cached position
-                    float dx = el.Position.X - center.X;
-                    float dy = el.Position.Y - center.Y;
+                    // Check distance using cached position and center
+                    float dx = el.Position.X - cx;
+                    float dy = el.Position.Y - cy;
                     
                     if (dx*dx + dy*dy <= rSq)
                     {
-                        if (predicate == null || predicate(el.Entity))
+                        if (!hasPredicate || predicate(el.Entity))
                         {
-                            _reusableResults.Add(el.Entity);
-                            if (_reusableResults.Count >= maxResults) return _reusableResults;
+                            resultsSpan[resultCount++] = el.Entity;
+                            if (resultCount >= effectiveMax) goto Done;
                         }
                     }
                     elIdx = el.NextElementIndex;
@@ -355,32 +372,72 @@ public sealed class EntityQuadTree
                 while (elIdx != -1)
                 {
                     ref var el = ref _elements[elIdx];
-                    if (predicate == null || predicate(el.Entity))
+                    if (!hasPredicate || predicate(el.Entity))
                     {
-                        _reusableResults.Add(el.Entity);
-                        if (_reusableResults.Count >= maxResults) return _reusableResults;
+                        resultsSpan[resultCount++] = el.Entity;
+                        if (resultCount >= effectiveMax) goto Done;
                     }
                     elIdx = el.NextElementIndex;
                 }
             }
 
-            // 3. Push Children
+            // Push Children - SIMD optimized (check all 4 at once)
             if (node.FirstChildIndex != -1)
             {
-                for (int i = 0; i < 4; i++)
+                int baseIdx = node.FirstChildIndex;
+                
+                if (checkRadius)
                 {
-                    int childIdx = node.FirstChildIndex + i;
-                    ref var child = ref _nodes[childIdx];
+                    // Load bounds from all 4 children
+                    ref var c0 = ref _nodes[baseIdx];
+                    ref var c1 = ref _nodes[baseIdx + 1];
+                    ref var c2 = ref _nodes[baseIdx + 2];
+                    ref var c3 = ref _nodes[baseIdx + 3];
                     
-                    // Only push intersecting children
-                    if (!checkRadius || IntersectsCircle(ref child, center, radius, rSq))
-                    {
-                         _nodeStack[stackPtr++] = childIdx;
-                    }
+                    // Build vectors for parallel AABB-circle intersection
+                    var minX = Vector128.Create(c0.LooseMinX, c1.LooseMinX, c2.LooseMinX, c3.LooseMinX);
+                    var maxX = Vector128.Create(c0.LooseMaxX, c1.LooseMaxX, c2.LooseMaxX, c3.LooseMaxX);
+                    var minY = Vector128.Create(c0.LooseMinY, c1.LooseMinY, c2.LooseMinY, c3.LooseMinY);
+                    var maxY = Vector128.Create(c0.LooseMaxY, c1.LooseMaxY, c2.LooseMaxY, c3.LooseMaxY);
+                    
+                    // Broadcast query params
+                    var cxVec = Vector128.Create(cx);
+                    var cyVec = Vector128.Create(cy);
+                    var rSqVec = Vector128.Create(rSq);
+                    
+                    // Clamp center to AABB: closest = max(min, min(max, center))
+                    var closestX = Vector128.Max(minX, Vector128.Min(maxX, cxVec));
+                    var closestY = Vector128.Max(minY, Vector128.Min(maxY, cyVec));
+                    
+                    // Distance squared from center to closest point
+                    var dx = cxVec - closestX;
+                    var dy = cyVec - closestY;
+                    var distSq = dx * dx + dy * dy;
+                    
+                    // Compare: distSq <= rSq (result is all 1s or all 0s per lane)
+                    var mask = Vector128.LessThanOrEqual(distSq, rSqVec);
+                    
+                    // Extract and push intersecting children
+                    // GetElement returns the float bits; non-zero means intersection
+                    if (mask.GetElement(0) != 0) _nodeStack[stackPtr++] = baseIdx;
+                    if (mask.GetElement(1) != 0) _nodeStack[stackPtr++] = baseIdx + 1;
+                    if (mask.GetElement(2) != 0) _nodeStack[stackPtr++] = baseIdx + 2;
+                    if (mask.GetElement(3) != 0) _nodeStack[stackPtr++] = baseIdx + 3;
+                }
+                else
+                {
+                    // No radius check - push all children
+                    _nodeStack[stackPtr++] = baseIdx;
+                    _nodeStack[stackPtr++] = baseIdx + 1;
+                    _nodeStack[stackPtr++] = baseIdx + 2;
+                    _nodeStack[stackPtr++] = baseIdx + 3;
                 }
             }
         }
 
+        Done:
+        // Trim to actual count
+        CollectionsMarshal.SetCount(_reusableResults, resultCount);
         return _reusableResults;
     }
 
@@ -393,7 +450,7 @@ public sealed class EntityQuadTree
         float rSq = radius * radius;
         bool checkRadius = !float.IsPositiveInfinity(radius);
         
-        if (checkRadius && !IntersectsCircle(ref _nodes[_rootIndex], center, radius, rSq))
+        if (checkRadius && !IntersectsCircle(ref _nodes[_rootIndex], center, rSq))
         {
             return _reusableResults;
         }
@@ -451,7 +508,7 @@ public sealed class EntityQuadTree
                 {
                     int childIdx = node.FirstChildIndex + i;
                     ref var child = ref _nodes[childIdx];
-                    if (!checkRadius || IntersectsCircle(ref child, center, radius, rSq))
+                    if (!checkRadius || IntersectsCircle(ref child, center, rSq))
                     {
                          _nodeStack[stackPtr++] = childIdx;
                     }
@@ -553,8 +610,7 @@ public sealed class EntityQuadTree
             // Pruning: If node is further than current best distance, skip
             // We check this on pop because bestDistSq SHRINKS during traversal.
             // A node pushed earlier might now be invalid.
-            float bestDist = float.IsPositiveInfinity(bestDistSq) ? float.PositiveInfinity : MathF.Sqrt(bestDistSq);
-            if (!IntersectsCircle(ref node, center, bestDist, bestDistSq)) continue;
+            if (!IntersectsCircle(ref node, center, bestDistSq)) continue;
 
             // Check Items
             int elIdx = node.FirstElementIndex;
@@ -582,11 +638,10 @@ public sealed class EntityQuadTree
             // Push children
             if (node.FirstChildIndex != -1)
             {
-                bestDist = float.IsPositiveInfinity(bestDistSq) ? float.PositiveInfinity : MathF.Sqrt(bestDistSq);
                 for (int i = 0; i < 4; i++)
                 {
                     int childIdx = node.FirstChildIndex + i;
-                    if (IntersectsCircle(ref _nodes[childIdx], center, bestDist, bestDistSq))
+                    if (IntersectsCircle(ref _nodes[childIdx], center, bestDistSq))
                     {
                         _nodeStack[stackPtr++] = childIdx;
                     }
@@ -600,31 +655,15 @@ public sealed class EntityQuadTree
     // ---------------- UTILS ----------------
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IntersectsCircle(ref NodeData node, Vector2 center, float radius, float radiusSq)
+    private static bool IntersectsCircle(ref NodeData node, Vector2 center, float radiusSq)
     {
-        if (float.IsPositiveInfinity(radiusSq)) return true;
-
-        // Fast bounding-sphere rejection using cached LooseRadius
-        float ndx = center.X - node.CenterX;
-        float ndy = center.Y - node.CenterY;
-        float centerDistSq = ndx * ndx + ndy * ndy;
-        float maxReach = radius + node.LooseRadius;
-        if (centerDistSq > maxReach * maxReach)
-        {
-            return false;
-        }
-
-        // Precise circle vs loose AABB
-        float minX = node.CenterX - node.LooseHalfSize;
-        float maxX = node.CenterX + node.LooseHalfSize;
-        float minY = node.CenterY - node.LooseHalfSize;
-        float maxY = node.CenterY + node.LooseHalfSize;
-
-        float closestX = center.X < minX ? minX : (center.X > maxX ? maxX : center.X);
-        float closestY = center.Y < minY ? minY : (center.Y > maxY ? maxY : center.Y);
-
-        float dx = center.X - closestX;
-        float dy = center.Y - closestY;
+        // Circle vs pre-computed loose AABB - find closest point on box to circle center
+        float cx = center.X;
+        float cy = center.Y;
+        float closestX = cx < node.LooseMinX ? node.LooseMinX : (cx > node.LooseMaxX ? node.LooseMaxX : cx);
+        float closestY = cy < node.LooseMinY ? node.LooseMinY : (cy > node.LooseMaxY ? node.LooseMaxY : cy);
+        float dx = cx - closestX;
+        float dy = cy - closestY;
         return (dx * dx + dy * dy) <= radiusSq;
     }
 
@@ -689,14 +728,19 @@ public sealed class EntityQuadTree
         node.CenterX = center.X;
         node.CenterY = center.Y;
         node.HalfSize = clampedHalf;
-        node.LooseHalfSize = clampedHalf * _looseFactor;
-        node.LooseRadius = node.LooseHalfSize * SQRT2;
+        
+        // Pre-compute loose AABB bounds for zero-arithmetic intersection tests
+        float looseHalf = clampedHalf * _looseFactor;
+        node.LooseMinX = center.X - looseHalf;
+        node.LooseMinY = center.Y - looseHalf;
+        node.LooseMaxX = center.X + looseHalf;
+        node.LooseMaxY = center.Y + looseHalf;
 
         Vector2 halfVec = new(clampedHalf, clampedHalf);
         node.Bounds = new Rect2(center - halfVec, halfVec * 2f);
 
-        Vector2 looseHalfVec = new(node.LooseHalfSize, node.LooseHalfSize);
-        node.LooseBounds = new Rect2(new Vector2(node.CenterX, node.CenterY) - looseHalfVec, looseHalfVec * 2f);
+        Vector2 looseHalfVec = new(looseHalf, looseHalf);
+        node.LooseBounds = new Rect2(center - looseHalfVec, looseHalfVec * 2f);
 
         node.Depth = depth;
         node.ParentIndex = parentIndex;

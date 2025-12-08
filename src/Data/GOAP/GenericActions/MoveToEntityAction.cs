@@ -14,6 +14,7 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
 {
     private readonly EntityFinderConfig _finderConfig = finderConfig;
     private readonly float _reachDistance = reachDistance;
+    private readonly float _reachDistanceSquared = reachDistance * reachDistance;
     private readonly string _actionName = actionName;
     
     private Entity _targetEntity;
@@ -25,8 +26,6 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
 
     public override void Enter(Entity agent)
     {
-        LM.Debug($"[{agent.Name}] {_actionName}: Enter called");
-        
         if (!agent.TryGetComponent(out _motor))
         {
             Fail("Agent lacks NPCMotorComponent");
@@ -57,61 +56,38 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
 
     private Entity FindNearestTarget(Entity agent)
     {
-        // Expanding search: start with configured radius, expand up to 3 times if needed
+        // Expanding search using SpatialIndex.FindNearest to avoid materializing large lists.
         float searchRadius = _finderConfig.SearchRadius;
         const int MAX_ATTEMPTS = 3;
-        var random = new System.Random();
         var agentPos = agent.Transform.Position;
+
+        // Build predicate once to avoid delegate allocations per attempt.
+        bool Filter(Entity e)
+        {
+            // Transform check first to avoid null deref
+            if (e.Transform == null) return false;
+
+            if (_finderConfig.Filter != null && !_finderConfig.Filter(e))
+                return false;
+
+            if (_finderConfig.RequireUnreserved && !ResourceReservationManager.Instance.IsAvailableFor(e, agent))
+                return false;
+
+            if (_finderConfig.RequireReservation && !ResourceReservationManager.Instance.IsReservedBy(e, agent))
+                return false;
+
+            return true;
+        }
 
         for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++)
         {
-            Entity best = null;
-            float bestScore = float.MaxValue;
+            var candidate = ServiceLocator.EntityManager.SpatialPartition
+                .FindNearest(agentPos, searchRadius, Filter);
 
-            foreach (var candidate in ServiceLocator.EntityManager
-                         .QueryByComponent<TransformComponent2D>(agentPos, searchRadius))
-            {
-                if (_finderConfig.Filter != null)
-                {
-                    bool passes;
-                    try
-                    {
-                        passes = _finderConfig.Filter(candidate);
-                    }
-                    catch
-                    {
-                        continue;
-                    }
-                    if (!passes) continue;
-                }
+            if (candidate != null)
+                return candidate;
 
-                if (_finderConfig.RequireUnreserved)
-                {
-                    if (!ResourceReservationManager.Instance.IsAvailableFor(candidate, agent))
-                        continue;
-                }
-                else if (_finderConfig.RequireReservation)
-                {
-                    if (!ResourceReservationManager.Instance.IsReservedBy(candidate, agent))
-                        continue;
-                }
-
-                // Random jitter reduces contention for identical nearest targets
-                float distance = agentPos.DistanceTo(candidate.Transform.Position);
-                float score = distance + (float)random.NextDouble() * 50f;
-
-                if (score < bestScore)
-                {
-                    bestScore = score;
-                    best = candidate;
-                }
-            }
-
-            if (best != null)
-                return best;
-
-            // Expand search radius for next attempt
-            searchRadius *= 2f;
+            searchRadius *= 2f; // expand search radius for next attempt
         }
 
         return null;
@@ -128,8 +104,9 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
             return ActionStatus.Succeeded;
 
         // Check distance manually as fallback
-        var distance = agent.Transform.Position.DistanceTo(_targetEntity.Transform.Position);
-        if (distance <= _reachDistance)
+        var delta = agent.Transform.Position - _targetEntity.Transform.Position;
+        var distanceSq = delta.LengthSquared();
+        if (distanceSq <= _reachDistanceSquared)
         {
             _arrived = true;
             return ActionStatus.Succeeded;
@@ -159,46 +136,11 @@ public sealed class MoveToEntityAction(EntityFinderConfig finderConfig, float re
     public override bool StillValid(Entity agent)
     {
         if (_failed) return false;
+        if (_arrived) return true;
+        if (_targetEntity == null || !_targetEntity.IsActive) return false;
 
         return EvaluateGuardPeriodically(agent, () =>
         {
-            // If current target is gone, try to find a new one instead of failing
-            if (_targetEntity == null || !_targetEntity.IsActive)
-            {
-                var newTarget = FindNearestTarget(agent);
-                if (newTarget != null)
-                {
-                    // Release old reservation if we had one
-                    if (_targetEntity != null && _finderConfig.ShouldReserve)
-                    {
-                        ResourceReservationManager.Instance.Release(_targetEntity, agent);
-                    }
-                    
-                    // Switch to new target
-                    _targetEntity = newTarget;
-                    
-                    // Reserve new target
-                    if (_finderConfig.ShouldReserve && !ResourceReservationManager.Instance.TryReserve(_targetEntity, agent))
-                    {
-                        LM.Warning($"[{agent.Name}] {_actionName}: Found new target but couldn't reserve it");
-                        return false;
-                    }
-                    
-                    // Update motor destination
-                    if (_motor != null)
-                    {
-                        _motor.Target = _targetEntity.Transform.Position;
-                    }
-                    
-                    LM.Info($"[{agent.Name}] {_actionName}: Original target gone, switching to {_targetEntity.Name}");
-                    return true;
-                }
-                
-                // No alternative target found - now we can fail
-                LM.Warning($"[{agent.Name}] {_actionName}: Target gone and no alternatives found");
-                return false;
-            }
-
             bool valid = true;
 
             if (_finderConfig.Filter != null)

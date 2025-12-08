@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using Game.Data.Components;
 
@@ -11,12 +12,13 @@ public static class StateComparison
     public static float CalculateStateComparisonHeuristic(State currentState, State goalState, State implicitGoals = null)
     {
         float h = 0f;
-        var processedKeys = new HashSet<int>();
+        int factCount = FactRegistry.Count;
+        var processedKeys = new BitArray(factCount);
 
         // 1. Process explicit goals, merging any overlapping implicit requirements
         foreach (var goalFact in goalState.FactsById)
         {
-            processedKeys.Add(goalFact.Key);
+            processedKeys.Set(goalFact.Key, true);
 
             FactValue effectiveTarget = goalFact.Value;
             if (implicitGoals != null && implicitGoals.TryGet(goalFact.Key, out var implicitVal))
@@ -32,7 +34,7 @@ public static class StateComparison
         {
             foreach (var implicitFact in implicitGoals.FactsById)
             {
-                if (processedKeys.Contains(implicitFact.Key))
+                if (processedKeys.Get(implicitFact.Key))
                     continue;
 
                 float cost = CalculateCost(currentState, implicitFact.Key, implicitFact.Value);

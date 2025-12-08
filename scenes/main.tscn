@@ -13,7 +13,7 @@
 [node name="Game" type="Node2D"]
 script = ExtResource("1_0wfyh")
 DebugMode = true
-StartingScenario = "Minimal"
+StartingScenario = "StressTest"
 
 [node name="EntityManager" type="Node" parent="." node_paths=PackedStringArray("ViewRoot")]
 script = ExtResource("2_0wfyh")

@@ -12,8 +12,22 @@ public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTag
     private const float ComfortableTemperature = 70f;
     private const float CriticalTemperature = 30f;
     private const float WarmthRadius = 150f;
+    private const float CampfireCacheDurationSeconds = 0.5f;
+    
+    // Per-agent cache to avoid repeated spatial queries
+    private readonly Dictionary<Guid, (bool nearCampfire, float expireTime)> _campfireCache = new();
 
     public string Name => "Stay Warm";
+    
+    // Cached goal state - always the same, no need to recreate
+    private static readonly State _cachedGoalState = CreateGoalState();
+    
+    private static State CreateGoalState()
+    {
+        var s = new State();
+        s.Set(FactKeys.NearTarget(Tags.Campfire), true);
+        return s;
+    }
 
     
     public float PlanFailureCooldownSeconds => 0.25f;
@@ -51,26 +65,35 @@ public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTag
     
     public State GetGoalState(Entity agent)
     {
-        // Goal: be near a campfire so temperature can rise
-        var s = new State();
-        s.Set(FactKeys.NearTarget(Tags.Campfire), true);
-        return s;
+        // Return cached state - goal is always the same (be near campfire)
+        return _cachedGoalState;
     }
     
     public bool IsSatisfied(Entity agent)
     {
-        // Once we've reached a campfire or we're fully warmed up, this goal is satisfied.
-        if (IsNearCampfire(agent))
+        // Check cheap temperature first before expensive spatial query
+        if (agent.TryGetComponent<NPCData>(out var npcData) && npcData.Temperature >= ComfortableTemperature)
             return true;
 
-        if (agent.TryGetComponent<NPCData>(out var npcData) && npcData.Temperature >= ComfortableTemperature)
+        // Only do spatial query if temperature check failed
+        if (IsNearCampfire(agent))
             return true;
 
         return false;
     }
 
-    private static bool IsNearCampfire(Entity agent)
+    private bool IsNearCampfire(Entity agent)
     {
+        // Check cache first - use cached time to avoid expensive Godot interop!
+        float currentTime = Universe.GameManager.Instance.CachedTimeMsec / 1000f;
+        var agentId = agent.Id;
+        
+        if (_campfireCache.TryGetValue(agentId, out var cached) && currentTime < cached.expireTime)
+        {
+            return cached.nearCampfire;
+        }
+        
+        // Cache miss - do the spatial query
         if (!agent.TryGetComponent<TransformComponent2D>(out var transform))
             return false;
 
@@ -79,7 +102,12 @@ public class StayWarmGoal : IUtilityGoal, IUtilityGoalCooldowns, IUtilityGoalTag
                 e => e.HasTag(Tags.Campfire),
                 maxResults: 1);
 
-        return nearbyCampfires != null && nearbyCampfires.Count > 0;
+        bool result = nearbyCampfires != null && nearbyCampfires.Count > 0;
+        
+        // Cache the result
+        _campfireCache[agentId] = (result, currentTime + CampfireCacheDurationSeconds);
+        
+        return result;
     }
 
     public bool IsTargetTagRelevant(Tag tag)

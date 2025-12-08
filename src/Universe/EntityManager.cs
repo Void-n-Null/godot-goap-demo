@@ -72,6 +72,9 @@ public partial class EntityManager : Utils.SingletonNode<EntityManager>
 		GD.Print("EntityManager: Ready");
 		base._Ready();
 
+		// Initialize target tag lookup for O(1) proximity queries
+		TG.InitializeTargetTagLookup();
+
 		// Wire up subsystems via events - EntityManager is just the coordinator
 		// Note: EntityRegistry now handles all subsystem coordination internally
 		
