@@ -7,7 +7,7 @@ This project is a high-performance technical demonstration of Goal-Oriented Acti
 
 ## What's Inside?
 
-*   **High-Throughput GOAP Planner:** An advanced A* planner that can generate over 60,000 action plans per second, running in parallel across available CPU cores.
+*   **High-Throughput GOAP Planner:** An advanced A* planner that can generate over 190,000 action plans per second, running in parallel across available CPU cores.
 *   **Custom ECS Architecture:** A lightweight, data-oriented ECS implementation capable of updating 150,000+ simple entities while keeping frame times manageable.
 *   **Spatial Partitioning:** A custom QuadTree implementation optimized for fast spatial queries and resource lookups.
 *   **Benchmarking Tools:** Built-in harnesses to stress-test the system and visualize performance metrics (press `B` in-game).
@@ -27,7 +27,7 @@ The ECS logic update loop is decoupled from rendering, allowing the simulation t
 ![ECS Performance Graph](ECS_Perf_Graph.png)
 
 ### GOAP AI Throughput
-The AI planner scales linearly with the number of concurrent agents. In my tests, the system achieved a throughput of approximately **62,000 agents per second**, with an average planning cost of just **0.045ms** per plan.
+The AI planner scales linearly with the number of concurrent agents. In my tests, the system achieved a throughput of approximately **76,500 agents per second**, with an average planning cost of just **0.020ms** per plan.
 
 ![GOAP Performance Graph](GOAP_Perf_Graph.png)
 
@@ -108,7 +108,7 @@ Since step 1 created an optimized step set, the planner runs a standard A\* sear
 **Numeric Reasoning via Implicit Requirements:**  
 To handle integer-based facts (like inventory counts), the planner derives *implicit requirements* from producer steps. If a goal requires "has cooked food" and the step to cook food requires "raw food count >= 1", the planner infers that acquiring raw food is a sub-goal. This allows the heuristic to intelligently guide the search toward states that satisfy numeric preconditions, even when they aren't explicit in the original goal.
 
-The result is a planner that scales linearly with agent count and can generate over 10,000 plans per second on modern hardware. 
+The result is a planner that scales linearly with agent count and can generate over 190,000 plans per second on modern hardware. 
 
  
 

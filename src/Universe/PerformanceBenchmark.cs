@@ -145,7 +145,7 @@ public partial class PerformanceBenchmark : Node
 	private async Task RunEcsThroughputTest()
 	{
 		GD.Print("\n[Test 1] ECS Throughput vs. Entity Count");
-		_results.Add("Section,ECS_Count,ECS_UpdateMs,ECS_FrameMs");
+		_results.Add("Section,ECS_Count,ECS_UpdateMs");
 
 		foreach (var targetCount in EcsEntityTargets)
 		{
@@ -155,15 +155,15 @@ public partial class PerformanceBenchmark : Node
 				SpawnBenchmarkEntities(needed);
 			}
 
-			// let components settle
-			for (int i = 0; i < 5; i++)
+			// Let components settle (more frames for larger entity counts)
+			int settleFrames = targetCount >= 100_000 ? 15 : 5;
+			for (int i = 0; i < settleFrames; i++)
 			{
 				await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 			}
 
 			const int samples = 60;
 			double totalUpdateMs = 0;
-			double totalFrameBudget = 0;
 
 			for (int i = 0; i < samples; i++)
 			{
@@ -175,16 +175,14 @@ public partial class PerformanceBenchmark : Node
 
 				ulong endUsec = Time.GetTicksUsec();
 				totalUpdateMs += (endUsec - startUsec) / 1000.0;
-				totalFrameBudget += 1000.0 / Math.Max(1.0, Engine.GetFramesPerSecond());
 
 				await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
 			}
 
 			double avgUpdate = totalUpdateMs / samples;
-			double avgFrame = totalFrameBudget / samples;
 
-			GD.Print($"Count {targetCount:N0} | Update {avgUpdate:F2} ms | Frame {avgFrame:F2} ms");
-			_results.Add($"ECS,{targetCount},{avgUpdate:F2},{avgFrame:F2}");
+			GD.Print($"Count {targetCount:N0} | Update {avgUpdate:F2} ms");
+			_results.Add($"ECS,{targetCount},{avgUpdate:F2}");
 		}
 	}
 
@@ -237,8 +235,17 @@ public partial class PerformanceBenchmark : Node
 		var goalState = new State();
 		goalState.Set("has_campfire", true);
 
-		// Warm planner caches
-		AdvancedGoalPlanner.ForwardPlan(initialState, goalState);
+		// Warmup: stabilize JIT and fill gen0
+		for (int i = 0; i < 50; i++)
+		{
+			AdvancedGoalPlanner.ForwardPlan(initialState, goalState);
+		}
+
+		// Stabilize GC before timing
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
+		Thread.Sleep(50);
 
 		const int planCount = 500;
 
@@ -252,6 +259,15 @@ public partial class PerformanceBenchmark : Node
 
 		GD.Print($"Serial {planCount} plans -> {serialMs:F2} ms total ({serialPerPlan:F4} ms/plan)");
 		_results.Add($"GOAP_Serial,{planCount},{serialMs:F2},{serialPerPlan:F4}");
+
+		// Stabilize GC before parallel test
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
+		Thread.Sleep(50);
+
+		// Warm ThreadPool workers before timing
+		Parallel.For(0, System.Environment.ProcessorCount * 2, _ => Thread.SpinWait(1000));
 
 		ulong startParallel = Time.GetTicksUsec();
 		Parallel.For(0, planCount, _ =>
